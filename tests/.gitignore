@@ -4,3 +4,4 @@ __pycache__/
 .vedro/
 reports/
 reports_*/
+e2e/fixtures/project/scenarios/_case_*.py

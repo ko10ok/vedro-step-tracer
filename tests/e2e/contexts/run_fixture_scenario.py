@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-__all__ = ("FixtureRun", "run_fixture_scenario",)
+__all__ = ("FixtureRun", "run_fixture_scenario", "run_fixture_path",)
 
 _FIXTURE_PROJECT = Path(__file__).resolve().parents[1] / "fixtures" / "project"
 _GENERATED_PREFIX = "_case_"
@@ -103,3 +103,29 @@ def _reset_fixture_state() -> None:
     # На случай, если предыдущий прогон был прерван до cleanup в finally.
     for leftover in _FIXTURE_PROJECT.glob(f"scenarios/{_GENERATED_PREFIX}*.py"):
         leftover.unlink(missing_ok=True)
+
+
+def run_fixture_path(scenario_path: str, args: Optional[List[str]] = None,
+                     env: Optional[Dict[str, str]] = None,
+                     timeout: float = 120) -> FixtureRun:
+    """
+    Прогнать уже существующий (статический, зафиксированный в репозитории)
+    набор сценариев фикстур-проекта по пути ``scenario_path`` — в отличие от
+    ``run_fixture_scenario``, ничего не генерирует и не пишет на диск:
+    сценарии уже лежат как данные (например ``scenarios/perf/`` — нагрузочные
+    сценарии перфоманс-теста, см. e2e/scenarios/performance).
+    """
+    _reset_fixture_state()
+    full_env = dict(os.environ)
+    full_env.setdefault("NO_COLOR", "1")
+    full_env.update(env or {})
+    result = subprocess.run(
+        [sys.executable, "-m", "vedro", "run", scenario_path, *(args or [])],
+        cwd=str(_FIXTURE_PROJECT),
+        env=full_env,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    return FixtureRun(returncode=result.returncode, stdout=result.stdout + result.stderr,
+                      scenario_path=scenario_path)
