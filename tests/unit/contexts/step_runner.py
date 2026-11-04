@@ -7,6 +7,7 @@ unit-уровень: проверяем построение дерева по �
 import os
 from typing import Any, Callable, Dict, List, Optional, Union
 
+from vedro_step_tracer.exclude import ValueExcludeRules
 from vedro_step_tracer.tracing import FunctionTracer, collapse_tree
 from vedro_step_tracer.tracing.nodes import StepNode, VarNode
 
@@ -34,6 +35,7 @@ def run_step(step: Callable[[Any], None],
             scenario: Optional[Any] = None,
             exclude_paths: Optional[List[str]] = None,
             exclude_functions: Optional[List[str]] = None,
+            exclude_value_rules: Optional[ValueExcludeRules] = None,
             collapse: bool = True) -> List[Union[StepNode, VarNode]]:
     """
     Выполнить ``step(scenario)`` под трейсером и вернуть дерево вызовов.
@@ -52,6 +54,7 @@ def run_step(step: Callable[[Any], None],
         step_name=step.__name__,
         exclude_paths=exclude_paths,
         exclude_functions=exclude_functions,
+        exclude_value_rules=exclude_value_rules,
     )
     tracer.start()
     try:

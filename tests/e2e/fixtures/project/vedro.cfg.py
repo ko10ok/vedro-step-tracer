@@ -12,6 +12,7 @@ import os
 
 import vedro
 from vedro_step_tracer import ReportType, VedroStepTracer
+from vedro_step_tracer.exclude import var
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -49,3 +50,10 @@ class Config(vedro.Config):
             # Детерминированный job_id/pattern — не нужны локально, тест не
             # имитирует GitLab CI.
             job_id = ""
+
+            # Исключение одной переменной по имени+функции — безвредно для
+            # всех остальных сценариев, т.к. build_record_with_sensitive_local
+            # вызывают только сценарии scenarios/perf_exclude_var.
+            extra_exclude_value_types = [
+                var("sensitive_token", function="build_record_with_sensitive_local"),
+            ]

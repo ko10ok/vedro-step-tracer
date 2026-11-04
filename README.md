@@ -48,6 +48,8 @@ python -m vedro run --tr --tr-no-color
 | `target_dirs` | `list[str]` | `["helpers", "contexts", "interfaces"]` | Директории для трейсинга (относительно workdir) |
 | `exclude_paths` | `list[str]` | `[]` | Glob-паттерны файлов внутри `target_dirs`, вызовы из которых не попадают в дерево |
 | `exclude_functions` | `list[str]` | `[]` | Имена функций, которые не попадают в дерево |
+| `exclude_value_types` | `list[...]` | уже найденные проблемные типы (asyncio-транспорты, event loop, `Process`, `ssl`, `socket`) | Правила, по которым значения переменных (а не вызовы) заменяются заглушкой вместо копирования — см. [`docs/exclude.md`](docs/exclude.md) |
+| `extra_exclude_value_types` | `list[...]` | `[]` | То же самое поверх `exclude_value_types`, без переписывания базового списка — см. [`docs/exclude.md`](docs/exclude.md) |
 | `attach_artifacts` | `bool` | `True` | Сохранять отчёт в директорию артефактов сценария |
 | `report_formats` | `list[str]` | `[ReportType.HTML]` | Формат(ы) файлового отчёта: `ReportType.HTML`/`ReportType.MARKDOWN` или просто текстом `"html"`/`"markdown"` (без учёта регистра); оба сразу — `[ReportType.HTML, ReportType.MARKDOWN]` |
 | `save_to_dir` | `bool` | `False` | Дополнительно сохранять отчёт в `output_dir` |
@@ -80,6 +82,9 @@ class Config(vedro.Config):
             enabled = True
             target_dirs = ['helpers', 'contexts', 'interfaces']
             exclude_paths = ['interfaces/generated_client.py']
+
+            # Подробности и остальные виды правил — см. docs/exclude.md.
+            extra_exclude_value_types = [var('process', function='run_vedro')]
 
             # Отчёт уходит файлом в артефакты сценария; stdout остаётся читаемым.
             attach_artifacts = True

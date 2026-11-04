@@ -6,6 +6,7 @@ import sys
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 from .. import settings
+from ..exclude import EXCLUDED_PLACEHOLDER, ValueExcludeRules
 from .nodes import StepNode, VarNode, safe_copy
 
 __all__ = ("FunctionTracer",)
@@ -61,7 +62,8 @@ class FunctionTracer:
                  scenario_self: Any = None,
                  step_name: str = "",
                  exclude_paths: Optional[List[str]] = None,
-                 exclude_functions: Optional[List[str]] = None) -> None:
+                 exclude_functions: Optional[List[str]] = None,
+                 exclude_value_rules: Optional[ValueExcludeRules] = None) -> None:
         self.target_dirs = [os.path.abspath(d) for d in target_dirs]
         # Файлы и функции внутри target_dirs, которые не должны порождать
         # узлы дерева (шум вроде обёрток над docker SDK). Исключение
@@ -71,6 +73,10 @@ class FunctionTracer:
         # исключённому предку (см. _global_trace).
         self.exclude_paths: List[str] = list(exclude_paths or [])
         self.exclude_functions: Set[str] = set(exclude_functions or [])
+        # Правила исключения значений из глубокого снимка (safe_copy) — объекты,
+        # держащие ОС-ресурсы (пайпы, сокеты, транспорты asyncio, ssl), заменяются
+        # на заглушку вместо копирования/хранения живой ссылки (см. exclude.py).
+        self._exclude_value_rules: ValueExcludeRules = exclude_value_rules or ValueExcludeRules()
         self.call_stack: List[StepNode] = []
         self.root_children: List[Union[StepNode, VarNode]] = []
         self._old_trace: Optional[Callable] = None
@@ -226,6 +232,18 @@ class FunctionTracer:
 
     # ── Последовательная фиксация scope/locals ──────────────────────────────
 
+    def _safe_capture(self, value: Any, var_name: str, function: str = "", module: str = "") -> Any:
+        """
+        Снять снимок значения для дерева трейса, заменив его заглушкой, если
+        оно попадает под exclude_value_types/extra_exclude_value_types —
+        вместо попытки copy.deepcopy/copy (которая для таких объектов либо
+        падает, либо оставляет в дереве живую ссылку на оригинал, см.
+        exclude.py).
+        """
+        if self._exclude_value_rules.excluded(value, var_name=var_name, function=function, module=module):
+            return EXCLUDED_PLACEHOLDER
+        return safe_copy(value)
+
     def _emit_scope_diff(self, target_children: List[Union[StepNode, VarNode]]) -> None:
         """Сравнить текущие атрибуты self сценария со снимком и дописать новые/изменённые."""
         if self.scenario_self is None:
@@ -237,10 +255,10 @@ class FunctionTracer:
             cur_fp = _fingerprint(value)
             prev_fp = self._self_snapshot.get(key)
             if prev_fp is None:
-                target_children.append(VarNode(key, safe_copy(value), kind="scope"))
+                target_children.append(VarNode(key, self._safe_capture(value, key), kind="scope"))
                 self._self_snapshot[key] = cur_fp
             elif prev_fp != cur_fp:
-                target_children.append(VarNode(key, safe_copy(value), kind="scope_changed"))
+                target_children.append(VarNode(key, self._safe_capture(value, key), kind="scope_changed"))
                 self._self_snapshot[key] = cur_fp
 
     def _emit_locals_diff(self, frame: Any, target_children: List[Union[StepNode, VarNode]],
@@ -252,13 +270,17 @@ class FunctionTracer:
             loc = frame.f_locals
         except (AttributeError, ValueError):
             return
+        function = frame.f_code.co_name
+        module = self._get_relative_module(frame.f_code.co_filename)
         for key, value in loc.items():
             if key in settings.FILTERED_KEYS or key.startswith("__"):
                 continue
             cur_fp = _fingerprint(value)
             prev_fp = snapshot.get(key)
             if prev_fp is None or prev_fp != cur_fp:
-                target_children.append(VarNode(key, safe_copy(value), kind="local"))
+                target_children.append(
+                    VarNode(key, self._safe_capture(value, key, function, module), kind="local")
+                )
                 snapshot[key] = cur_fp
 
     def _flush_before_call(self) -> None:
@@ -324,7 +346,9 @@ class FunctionTracer:
             if name not in frame.f_locals:
                 continue
             value = frame.f_locals[name]
-            node.children.append(VarNode(name, safe_copy(value), kind="arg"))
+            node.children.append(
+                VarNode(name, self._safe_capture(value, name, func_name, module), kind="arg")
+            )
             own_snapshot[name] = _fingerprint(value)
         self._locals_snapshots[id(frame)] = own_snapshot
 
@@ -377,8 +401,20 @@ class FunctionTracer:
         # для сопоставления имён аргументов при построении узла).
         local_vars = self._collect_locals(frame)
 
-        # Сокращаем return_value для хранения
-        current.close("PASS", local_vars, return_value)
+        # Возвращаемое значение намеренно хранится «как есть» (без copy) —
+        # identity (is/is not) между return_value родителя и вложенного
+        # вызова используется для схлопывания транзитных цепочек
+        # (см. tree.collapse_passthrough). Копирование сломало бы это
+        # сравнение. Единственное исключение — значения, попавшие под
+        # exclude_value_types: их всё равно нельзя держать живыми дольше
+        # нормального, поэтому они заменяются заглушкой.
+        safe_return_value = return_value
+        if return_value is not None and self._exclude_value_rules.excluded(
+            return_value, var_name="", function=func_name, module=current.module
+        ):
+            safe_return_value = EXCLUDED_PLACEHOLDER
+
+        current.close("PASS", local_vars, safe_return_value)
         self.call_stack.pop()
         if self._active_frames:
             self._active_frames.pop()

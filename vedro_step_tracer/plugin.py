@@ -21,6 +21,7 @@ from vedro.events import (
     StepRunEvent,
 )
 from . import gitlab, settings
+from .exclude import DEFAULT_EXCLUDED_VALUE_TYPES, ValueExcludeRules
 from .filenames import cleanup_reports, sanitize_filename
 from .reporting.base import BaseReportRenderer
 from .reporting.html import HtmlTreeWriter
@@ -77,6 +78,13 @@ class VedroStepTracerPlugin(Plugin):
         self._collapse_passthrough: bool = getattr(config, "collapse_passthrough", True)
         self._exclude_paths: List[str] = list(getattr(config, "exclude_paths", []) or [])
         self._exclude_functions: List[str] = list(getattr(config, "exclude_functions", []) or [])
+        # Правила исключения значений (см. VedroStepTracer.exclude_value_types) —
+        # базовый список (по умолчанию уже найденные проблемные типы) и
+        # пользовательский поверх него, скомпилированные один раз при старте.
+        self._exclude_value_rules: ValueExcludeRules = ValueExcludeRules(
+            list(getattr(config, "exclude_value_types", DEFAULT_EXCLUDED_VALUE_TYPES) or [])
+            + list(getattr(config, "extra_exclude_value_types", []) or [])
+        )
         # job_id по умолчанию не заполнен (локальный запуск); в CI конфиг
         # проекта должен передавать его из переменной окружения, например:
         # job_id = os.environ.get('CI_JOB_ID'). Наличие job_id означает,
@@ -322,7 +330,8 @@ class VedroStepTracerPlugin(Plugin):
                                       scenario_self=self._scenario_instance,
                                       step_name=step_name,
                                       exclude_paths=self._exclude_paths,
-                                      exclude_functions=self._exclude_functions)
+                                      exclude_functions=self._exclude_functions,
+                                      exclude_value_rules=self._exclude_value_rules)
         self._tracer.start()
 
     async def on_step_passed(self, event: StepPassedEvent) -> None:

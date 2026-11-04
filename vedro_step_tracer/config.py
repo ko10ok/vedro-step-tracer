@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from vedro.core import PluginConfig
 
+from .exclude import DEFAULT_EXCLUDED_VALUE_TYPES, ExcludeRule
 from .plugin import VedroStepTracerPlugin
 from .report_types import ReportType
 
@@ -25,6 +26,19 @@ class VedroStepTracer(PluginConfig):
 
     # Имена функций, которые не попадают в дерево (по тому же правилу).
     exclude_functions: List[str] = []
+
+    # Правила исключения ЗНАЧЕНИЙ переменных из снимка (а не вызовов целиком)
+    # — объекты вроде пайпов/сокетов/транспортов asyncio/ssl не копируются
+    # безопасно и не должны оставаться живыми ссылками в дереве трейса дольше
+    # шага. По умолчанию — уже найденные проблемные типы (см.
+    # exclude.DEFAULT_EXCLUDED_VALUE_TYPES); можно переопределить
+    # целиком, если дефолты не подходят. Подробности и все варианты правил
+    # (тип, имя типа, module(), regex, callable, var()) — см. docs/exclude.md.
+    exclude_value_types: List[ExcludeRule] = list(DEFAULT_EXCLUDED_VALUE_TYPES)
+
+    # Дополнительные правила поверх exclude_value_types — тот же набор
+    # возможностей, без необходимости переписывать базовый список целиком.
+    extra_exclude_value_types: List[ExcludeRule] = []
 
     # Куда сохранять логи (используется только при save_to_dir = True)
     output_dir: str = "logs/traces"

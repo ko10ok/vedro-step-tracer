@@ -1,9 +1,11 @@
 """
 Тяжёлые по данным и глубине вызовы — отдельно от contexts/sample_calls.py,
-используются только нагрузочными сценариями из ``scenarios/perf/`` (см.
-``e2e/scenarios/performance``).
+используются только нагрузочными сценариями из ``scenarios/perf/``,
+``scenarios/perf_1000/``, ``scenarios/perf_exclude_default/`` и
+``scenarios/perf_exclude_var/`` (см. ``e2e/scenarios/performance``).
 """
 
+import socket
 from typing import Any, Dict, List
 
 
@@ -45,4 +47,31 @@ def summarize_level_1(dataset: List[Dict[str, Any]]) -> int:
 
 def heavy_workload(size: int) -> int:
     dataset = build_dataset(size)
+    return summarize_level_1(dataset)
+
+
+def build_record_holding_a_socket(index: int) -> Dict[str, Any]:
+    sock = socket.socket()
+    try:
+        record = _build_record(index)
+        record["has_socket"] = True
+        return record
+    finally:
+        sock.close()
+
+
+def heavy_workload_with_default_exclusion(size: int) -> int:
+    dataset = [build_record_holding_a_socket(i) for i in range(size)]
+    return summarize_level_1(dataset)
+
+
+def build_record_with_sensitive_local(index: int) -> Dict[str, Any]:
+    sensitive_token = {"secret": "x" * 64, "index": index}
+    record = _build_record(index)
+    record["token_len"] = len(sensitive_token["secret"])
+    return record
+
+
+def heavy_workload_with_var_exclusion(size: int) -> int:
+    dataset = [build_record_with_sensitive_local(i) for i in range(size)]
     return summarize_level_1(dataset)
