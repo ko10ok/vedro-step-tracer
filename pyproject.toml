@@ -13,3 +13,10 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["vedro_step_tracer*"]
+
+# Статические ассеты HTML-отчёта (report.html/css/js) — не .py-файлы, поэтому
+# setuptools не включает их в wheel по умолчанию. Без этого объявления
+# load_asset() падает с FileNotFoundError в установленном пакете при первом
+# же рендере отчёта (см. vedro_step_tracer/reporting/html/assets/__init__.py).
+[tool.setuptools.package-data]
+vedro_step_tracer = ["reporting/html/assets/*.html", "reporting/html/assets/*.css", "reporting/html/assets/*.js"]
