@@ -2,6 +2,7 @@
 
 from .base import BaseReportRenderer
 from .html import HtmlTreeWriter
+from .markdown import MarkdownTreeWriter
 from .terminal import TreeWriter
 
-__all__ = ("BaseReportRenderer", "HtmlTreeWriter", "TreeWriter",)
+__all__ = ("BaseReportRenderer", "HtmlTreeWriter", "MarkdownTreeWriter", "TreeWriter",)

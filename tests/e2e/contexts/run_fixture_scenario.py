@@ -44,9 +44,14 @@ class FixtureRun:
         pattern = str(_FIXTURE_PROJECT / output_dir / "*.html")
         return sorted(Path(p) for p in glob.glob(pattern))
 
-    def artifact_reports(self) -> List[Path]:
-        """HTML-отчёты, записанные как артефакт сценария (attach_artifacts=1)."""
-        pattern = str(_FIXTURE_PROJECT / ".vedro" / "artifacts" / "**" / "vedro-step-tracer.html")
+    def markdown_reports(self, output_dir: str) -> List[Path]:
+        """Markdown-отчёты, сохранённые напрямую в ``output_dir`` (save_to_dir=1)."""
+        pattern = str(_FIXTURE_PROJECT / output_dir / "*.md")
+        return sorted(Path(p) for p in glob.glob(pattern))
+
+    def artifact_reports(self, name: str = "vedro-step-tracer.html") -> List[Path]:
+        """Отчёты, записанные как артефакт сценария (attach_artifacts=1)."""
+        pattern = str(_FIXTURE_PROJECT / ".vedro" / "artifacts" / "**" / name)
         return sorted(Path(p) for p in glob.glob(pattern, recursive=True))
 
 

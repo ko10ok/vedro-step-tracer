@@ -5,8 +5,9 @@ from typing import List, Optional
 from vedro.core import PluginConfig
 
 from .plugin import VedroStepTracerPlugin
+from .report_types import ReportType
 
-__all__ = ("VedroStepTracer",)
+__all__ = ("VedroStepTracer", "ReportType",)
 
 
 class VedroStepTracer(PluginConfig):
@@ -33,6 +34,17 @@ class VedroStepTracer(PluginConfig):
     # Файл пишется напрямую, артефактом vedro не прикрепляется: в результате
     # сценария остаётся одна строка со ссылкой на отчёт.
     attach_artifacts: bool = True
+
+    # Формат(ы) файлового отчёта: ReportType.HTML (по умолчанию, та же
+    # вёрстка со схлопываемыми секциями и подсветкой значений),
+    # ReportType.MARKDOWN (тот же порядок блоков, но простой Markdown с
+    # <details>/<summary> вместо HTML-вёрстки значений — удобно смотреть
+    # прямо в GitLab/GitHub UI без скачивания файла) либо оба сразу:
+    # report_formats = [ReportType.HTML, ReportType.MARKDOWN].
+    # ReportType — не enum, а строковые константы, поэтому значения можно
+    # задавать и напрямую текстом (без учёта регистра), например из
+    # переменной окружения в CI: report_formats = os.environ['FORMATS'].split(',').
+    report_formats: List[str] = [ReportType.HTML]
 
     # Дополнительно сохранять HTML-отчёт в output_dir. Прежнее поведение;
     # нужно там, где артефакты vedro не собираются (например, часть job'ов CI).
@@ -71,15 +83,23 @@ class VedroStepTracer(PluginConfig):
     # (запуск в GitLab CI); при локальном запуске ссылка формируется через локальный file:// путь.
     artifact_url_pattern: str = ""
 
+    # Корень проекта на хостовой машине, подставляемый в хостовые ссылки
+    # на файлы (см. gitlab.to_host_path). По умолчанию берётся из
+    # переменной окружения HOST_PROJECT_ROOT_DIRECTORY; пустая строка
+    # (как в CI, так и при локальном запуске без переменной) означает, что
+    # хостовые ссылки не строятся — путь остаётся как есть.
+    host_project_root_directory: str = ""
+
     # Подпуть рабочей директории относительно корня репозитория,
     # используемый при формировании хостовых и артефактных ссылок.
     # Пустая строка означает, что рабочая директория — корень репозитория.
     workdir_subpath: str = ""
 
-    # Удалять ранее сохранённые HTML-отчёты из output_dir перед прогоном.
+    # Удалять ранее сохранённые отчёты из output_dir перед прогоном.
     # Иначе директория копится от запуска к запуску, и среди старых файлов
-    # трудно найти отчёт текущего прогона. Удаляются только *.html в самой
-    # output_dir, без рекурсии (см. filenames.cleanup_reports).
+    # трудно найти отчёт текущего прогона. Удаляются только файлы активного
+    # формата (report_format) в самой output_dir, без рекурсии
+    # (см. filenames.cleanup_reports).
     cleanup_before: bool = True
 
     # Выводить дерево шагов service-сообщениями TeamCity — тогда шаги и

@@ -36,14 +36,18 @@ def section_end(section_id: str) -> str:
     return f"\033[0Ksection_end:{ts}:{section_id}\r\033[0K\n"
 
 
-def to_host_path(filepath: str, project_root: str, workdir_subpath: str) -> str:
+def to_host_path(filepath: str, project_root: str, workdir_subpath: str,
+                 host_root: Optional[str] = None) -> str:
     """
     Преобразовать путь в рабочей директории в путь на хостовой машине.
 
-    Если задан `HOST_PROJECT_ROOT_DIRECTORY`, к корню проекта на хосте
-    добавляются подпуть рабочей директории и относительный путь к файлу.
+    Если задан `host_root` (явно либо через переменную окружения
+    `HOST_PROJECT_ROOT_DIRECTORY` — см. VedroStepTracer.host_project_root_directory),
+    к корню проекта на хосте добавляются подпуть рабочей директории и
+    относительный путь к файлу.
     """
-    host_root = os.environ.get("HOST_PROJECT_ROOT_DIRECTORY")
+    if host_root is None:
+        host_root = os.environ.get("HOST_PROJECT_ROOT_DIRECTORY")
     if not host_root:
         return filepath
     try:

@@ -4,7 +4,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type
 
 from vedro.core import Dispatcher, Plugin
 from vedro.events import (
@@ -22,11 +22,14 @@ from vedro.events import (
 )
 from . import gitlab, settings
 from .filenames import cleanup_reports, sanitize_filename
+from .reporting.base import BaseReportRenderer
 from .reporting.html import HtmlTreeWriter
 from .reporting.html.traceback import render_error_text, render_tb_html
 from .reporting.llm import render_tb_text
+from .reporting.markdown import MarkdownTreeWriter
 from .reporting.teamcity import TeamCityTreeWriter
 from .reporting.terminal import TreeWriter
+from .report_types import ReportType
 from .tracing import FunctionTracer, RootStep, collapse_tree
 
 if TYPE_CHECKING:
@@ -34,8 +37,17 @@ if TYPE_CHECKING:
 
 __all__ = ("VedroStepTracerPlugin",)
 
-# Имя артефакта сценария с отчётом трейсера.
-_ARTIFACT_NAME = "vedro-step-tracer.html"
+# Расширения файлов для каждого формата отчёта (артефакт / output_dir).
+# ReportType — не enum, а строковые константы (см. report_types.py), поэтому
+# ключи здесь — обычные нормализованные (lower-case) строки.
+_FORMAT_EXTENSIONS: Dict[str, str] = {
+    ReportType.HTML: "html",
+    ReportType.MARKDOWN: "md",
+}
+_ARTIFACT_NAMES: Dict[str, str] = {
+    fmt: f"vedro-step-tracer.{ext}" for fmt, ext in _FORMAT_EXTENSIONS.items()
+}
+_VALID_REPORT_FORMATS = frozenset(_FORMAT_EXTENSIONS)
 
 
 class VedroStepTracerPlugin(Plugin):
@@ -57,6 +69,11 @@ class VedroStepTracerPlugin(Plugin):
         self._max_line_len: int = getattr(config, "max_line_len", 1000)
         self._attach_artifacts: bool = getattr(config, "attach_artifacts", True)
         self._save_to_dir: bool = getattr(config, "save_to_dir", False)
+        # Формат(ы) файлового отчёта — ReportType.HTML/MARKDOWN либо просто
+        # текст "html"/"markdown" без учёта регистра (см. VedroStepTracer.report_formats).
+        self._report_formats: List[str] = self._parse_report_formats(
+            getattr(config, "report_formats", [ReportType.HTML])
+        )
         self._collapse_passthrough: bool = getattr(config, "collapse_passthrough", True)
         self._exclude_paths: List[str] = list(getattr(config, "exclude_paths", []) or [])
         self._exclude_functions: List[str] = list(getattr(config, "exclude_functions", []) or [])
@@ -71,6 +88,12 @@ class VedroStepTracerPlugin(Plugin):
         self._artifact_url_pattern: str = getattr(config, "artifact_url_pattern", "") or (
             os.environ.get("PROJECT_ARTIFACT_PATTERN", "")
         )
+        # Корень проекта на хостовой машине. По умолчанию берётся из
+        # переменной окружения HOST_PROJECT_ROOT_DIRECTORY (см.
+        # VedroStepTracer.host_project_root_directory).
+        self._host_project_root_directory: str = getattr(
+            config, "host_project_root_directory", ""
+        ) or os.environ.get("HOST_PROJECT_ROOT_DIRECTORY", "")
         # Подпуть рабочей директории относительно корня репозитория
         # (см. VedroStepTracer.workdir_subpath).
         self._workdir_subpath: str = getattr(config, "workdir_subpath", "")
@@ -99,6 +122,11 @@ class VedroStepTracerPlugin(Plugin):
         self._scenario_cls: Any = None
         self._writer: TreeWriter = TreeWriter(verbosity=1, color=True)
         self._html_writer: HtmlTreeWriter = HtmlTreeWriter()
+        self._markdown_writer: MarkdownTreeWriter = MarkdownTreeWriter()
+        self._report_writers: Dict[str, BaseReportRenderer] = {
+            ReportType.HTML: self._html_writer,
+            ReportType.MARKDOWN: self._markdown_writer,
+        }
         self._teamcity_writer: TeamCityTreeWriter = TeamCityTreeWriter()
         self._interactive: bool = False
         self._verbosity: int = 1
@@ -106,9 +134,10 @@ class VedroStepTracerPlugin(Plugin):
         self._scenario_instance: Any = None
         self._self_snapshot_before: Dict[str, Any] = {}
         self._report_saved: bool = False
-        # Ссылка на сохранённый отчёт — печатается в stdout один раз в конце
-        # сценария (см. on_scenario_reported).
-        self._report_link: Optional[str] = None
+        # Ссылки на сохранённые отчёты (формат, ссылка) — печатаются в stdout
+        # один раз в конце сценария (см. on_scenario_reported). Обычно одна
+        # запись (один активный формат), две — только при report_format="both".
+        self._report_links: List[Tuple[str, str]] = []
         # Результаты упавших сценариев — для итоговой сводки в конце прогона
         # (ссылки на отчёты читаются на CleanupEvent, когда Artifacted уже
         # дописал пути артефактов в extra_details).
@@ -233,7 +262,8 @@ class VedroStepTracerPlugin(Plugin):
             # Чистим отчёты прошлых прогонов до того, как появится первый новый:
             # иначе в директории вперемешку лежат отчёты разных запусков.
             if self._cleanup_before:
-                cleanup_reports(output_path)
+                for fmt in self._report_formats:
+                    cleanup_reports(output_path, suffix=f".{_FORMAT_EXTENSIONS[fmt]}")
 
     def _detect_teamcity(self, event: ArgParsedEvent) -> bool:
         """
@@ -259,7 +289,7 @@ class VedroStepTracerPlugin(Plugin):
         self._current_root_step = None
         self._scenario_failed = False
         self._report_saved = False
-        self._report_link = None
+        self._report_links = []
         scenario = event.scenario_result.scenario
         self._scenario_name = getattr(scenario, "subject", "") or scenario.__class__.__name__
         # Индекс параметризации: у всех запусков одного шаблона одинаковый
@@ -370,24 +400,37 @@ class VedroStepTracerPlugin(Plugin):
         if not self._scenario_steps or self._report_saved:
             return
         self._report_saved = True
-        self._report_link = None
+        self._report_links = []
 
-        html_report = self._render_html_report()
+        for fmt in self._report_formats:
+            content = self._render_report(fmt)
+            link = None
 
-        if self._attach_artifacts:
-            filepath = self._write_artifact(scenario_result, html_report)
-            if filepath is not None:
-                self._report_link = self._report_link_for(str(filepath))
+            if self._attach_artifacts:
+                filepath = self._write_artifact(scenario_result, content, fmt)
+                if filepath is not None:
+                    link = self._report_link_for(str(filepath))
 
-        if self._save_to_dir:
-            filepath = self._save_to_file(html_report)
-            if filepath is not None:
-                self._report_link = self._report_link_for(filepath)
+            if self._save_to_dir:
+                filepath = self._save_to_file(content, fmt)
+                if filepath is not None:
+                    link = self._report_link_for(filepath)
 
-        if self._report_link:
-            scenario_result.add_extra_details(f"🔎 Trace report: {self._report_link}")
+            if link:
+                self._report_links.append((fmt, link))
 
-    def _write_artifact(self, scenario_result: Any, content: str) -> Optional[Path]:
+        # Один активный формат — строка остаётся прежней (обратная
+        # совместимость), несколько — формат указывается в скобках, чтобы
+        # ссылки можно было различить.
+        if len(self._report_links) == 1:
+            _, link = self._report_links[0]
+            scenario_result.add_extra_details(f"🔎 Trace report: {link}")
+        else:
+            for fmt, link in self._report_links:
+                scenario_result.add_extra_details(f"🔎 Trace report ({fmt}): {link}")
+
+    def _write_artifact(self, scenario_result: Any, content: str,
+                       fmt: str) -> Optional[Path]:
         """
         Записать отчёт в директорию артефактов сценария.
 
@@ -407,7 +450,7 @@ class VedroStepTracerPlugin(Plugin):
         index = str(getattr(scenario, "template_index", None) or 0)
         name = getattr(scenario, "name", "")
         filepath = (self._artifacts_dir / Path(rel_path).with_suffix("") /
-                    f"{started_at}-{name}-{index}" / _ARTIFACT_NAME)
+                    f"{started_at}-{name}-{index}" / _ARTIFACT_NAMES[fmt])
         try:
             filepath.parent.mkdir(parents=True, exist_ok=True)
             filepath.write_text(content, encoding="utf-8")
@@ -461,7 +504,7 @@ class VedroStepTracerPlugin(Plugin):
         self._scenario_steps = []
         self._scenario_name = ""
         self._scenario_failed = False
-        self._report_link = None
+        self._report_links = []
 
     def _display_scenario_name(self) -> str:
         """Имя сценария с индексом параметризации, если он есть."""
@@ -497,15 +540,15 @@ class VedroStepTracerPlugin(Plugin):
         details = getattr(scenario_result, "extra_details", None) or []
         return [d for d in details if "Trace report" in str(d)]
 
-    def _save_to_file(self, content: str) -> Optional[str]:
-        """Сохранить HTML-отчёт в лог-файл. Возвращает путь к файлу (в контейнере)."""
+    def _save_to_file(self, content: str, fmt: str) -> Optional[str]:
+        """Сохранить отчёт в лог-файл. Возвращает путь к файлу (в контейнере)."""
         output_path = os.path.join(self._project_root, self._output_dir)
         safe_name = sanitize_filename(self._scenario_name)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         # Индекс параметризации обязателен в имени: у всех запусков шаблона
         # одинаковый subject, и отчёты перетирали бы друг друга.
         index = f"_{self._scenario_index}" if self._scenario_index is not None else ""
-        filename = f"{timestamp}_{safe_name}{index}.html"
+        filename = f"{timestamp}_{safe_name}{index}.{_FORMAT_EXTENSIONS[fmt]}"
         filepath = os.path.join(output_path, filename)
         try:
             with open(filepath, "w", encoding="utf-8") as f:
@@ -514,17 +557,62 @@ class VedroStepTracerPlugin(Plugin):
         except OSError:
             return None
 
-    def _render_html_report(self) -> str:
-        """Собрать HTML-отчёт по накопленным шагам сценария."""
+    def _render_report(self, fmt: str) -> str:
+        """Собрать отчёт выбранного формата по накопленным шагам сценария."""
         scenario_path = self._to_host_path(self._scenario_path) if self._scenario_path else ""
-        return self._html_writer.render_document(
+        return self._report_writers[fmt].render_document(
             self._display_scenario_name(), self._scenario_steps,
             scenario_path=scenario_path,
         )
 
+    @staticmethod
+    def _parse_report_formats(report_formats: Any) -> List[str]:
+        """
+        Проверить и нормализовать ``report_formats`` конфига.
+
+        ``ReportType`` — не enum, а строковые константы, поэтому значение
+        принимается и как ``ReportType.HTML``, и просто текстом ("html",
+        "HTML", "  Html ") без учёта регистра и пробелов по краям — удобно,
+        когда формат приходит из переменной окружения CI. Одиночная строка
+        (не список) тоже допустима. Неизвестное значение или пустой список —
+        явная ошибка конфигурации, а не молчаливый откат к html: иначе
+        опечатку сложно заметить.
+        """
+        if isinstance(report_formats, str):
+            report_formats = [report_formats]
+
+        formats: List[str] = []
+        for fmt in (report_formats or []):
+            if not isinstance(fmt, str):
+                raise TypeError(
+                    f"VedroStepTracer.report_formats: {fmt!r} — не строка, "
+                    f"ожидается ReportType.HTML/ReportType.MARKDOWN или "
+                    f"текст 'html'/'markdown'"
+                )
+            normalized = fmt.strip().lower()
+            if normalized not in _VALID_REPORT_FORMATS:
+                valid = ", ".join(sorted(_VALID_REPORT_FORMATS))
+                raise ValueError(
+                    f"VedroStepTracer.report_formats: недопустимое значение "
+                    f"{fmt!r}, ожидается одно из: {valid}"
+                )
+            formats.append(normalized)
+
+        if not formats:
+            raise ValueError(
+                "VedroStepTracer.report_formats: список форматов не может быть "
+                "пустым, укажите хотя бы один из ReportType"
+            )
+        # Сохраняем порядок, но убираем дубли (на случай, если один формат
+        # указали дважды).
+        return list(dict.fromkeys(formats))
+
     def _to_host_path(self, filepath: str) -> str:
         """Путь внутри контейнера → путь на хостовой машине (см. gitlab.to_host_path)."""
-        return gitlab.to_host_path(filepath, self._project_root, self._workdir_subpath)
+        return gitlab.to_host_path(
+            filepath, self._project_root, self._workdir_subpath,
+            self._host_project_root_directory,
+        )
 
     def _step_lineno(self, step_name: str) -> int:
         """Строка определения метода шага в классе сценария (0 — не найдена)."""

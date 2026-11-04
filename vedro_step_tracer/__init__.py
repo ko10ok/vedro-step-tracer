@@ -13,7 +13,7 @@ Vedro plugin: автоматический трейсинг вызовов фу�
   * ``plugin`` / ``config`` — интеграция с vedro.
 """
 
-from .config import VedroStepTracer
+from .config import ReportType, VedroStepTracer
 from .plugin import VedroStepTracerPlugin
 
-__all__ = ("VedroStepTracer", "VedroStepTracerPlugin",)
+__all__ = ("VedroStepTracer", "VedroStepTracerPlugin", "ReportType",)

@@ -49,8 +49,9 @@ python -m vedro run --tr --tr-no-color
 | `exclude_paths` | `list[str]` | `[]` | Glob-паттерны файлов внутри `target_dirs`, вызовы из которых не попадают в дерево |
 | `exclude_functions` | `list[str]` | `[]` | Имена функций, которые не попадают в дерево |
 | `attach_artifacts` | `bool` | `True` | Сохранять отчёт в директорию артефактов сценария |
-| `save_to_dir` | `bool` | `False` | Дополнительно сохранять HTML в `output_dir` |
-| `output_dir` | `str` | `"logs/traces"` | Папка для HTML-отчётов (нужна только при `save_to_dir`) |
+| `report_formats` | `list[str]` | `[ReportType.HTML]` | Формат(ы) файлового отчёта: `ReportType.HTML`/`ReportType.MARKDOWN` или просто текстом `"html"`/`"markdown"` (без учёта регистра); оба сразу — `[ReportType.HTML, ReportType.MARKDOWN]` |
+| `save_to_dir` | `bool` | `False` | Дополнительно сохранять отчёт в `output_dir` |
+| `output_dir` | `str` | `"logs/traces"` | Папка для файловых отчётов (нужна только при `save_to_dir`) |
 | `print_to_stdout` | `bool` | `False` | Печатать полное дерево в stdout (иначе — только ссылка на отчёт) |
 | `max_str_len` | `int` | `1000` | Макс. длина строкового значения; применяется к каждой физической строке |
 | `max_line_len` | `int` | `1000` | Макс. длина одной физической строки в выводе нестандартного объекта (`__str__`/`repr`/rich) |
@@ -68,7 +69,7 @@ python -m vedro run --tr --tr-no-color
 import os
 import vedro
 
-from vedro_step_tracer import VedroStepTracer
+from vedro_step_tracer import ReportType, VedroStepTracer
 
 
 class Config(vedro.Config):
@@ -83,6 +84,7 @@ class Config(vedro.Config):
             # Отчёт уходит файлом в артефакты сценария; stdout остаётся читаемым.
             attach_artifacts = True
             print_to_stdout = False
+            report_formats = [ReportType.HTML]  # или [ReportType.HTML, ReportType.MARKDOWN]
 
             output_dir = 'logs/traces'
             save_to_dir = bool(os.environ.get('CI_JOB_ID'))
