@@ -48,65 +48,19 @@ python -m vedro run --tr --tr-no-color
 | `target_dirs` | `list[str]` | `["helpers", "contexts", "interfaces"]` | Директории для трейсинга (относительно workdir) |
 | `exclude_paths` | `list[str]` | `[]` | Glob-паттерны файлов внутри `target_dirs`, вызовы из которых не попадают в дерево |
 | `exclude_functions` | `list[str]` | `[]` | Имена функций, которые не попадают в дерево |
+| `exclude_value_types` | `list[...]` | уже найденные проблемные типы (asyncio-транспорты, event loop, `Process`, `ssl`, `socket`) | Правила, по которым значения переменных (а не вызовы) заменяются заглушкой вместо копирования — см. [`docs/exclude.md`](docs/exclude.md) |
+| `extra_exclude_value_types` | `list[...]` | `[]` | То же самое поверх `exclude_value_types`, без переписывания базового списка — см. [`docs/exclude.md`](docs/exclude.md) |
 | `attach_artifacts` | `bool` | `True` | Сохранять отчёт в директорию артефактов сценария |
-| `save_to_dir` | `bool` | `False` | Дополнительно сохранять HTML в `output_dir` |
-| `output_dir` | `str` | `"logs/traces"` | Папка для HTML-отчётов (нужна только при `save_to_dir`) |
+| `report_formats` | `list[str]` | `[ReportType.HTML]` | Формат(ы) файлового отчёта: `ReportType.HTML`/`ReportType.MARKDOWN` или просто текстом `"html"`/`"markdown"` (без учёта регистра); оба сразу — `[ReportType.HTML, ReportType.MARKDOWN]` |
+| `save_to_dir` | `bool` | `False` | Дополнительно сохранять отчёт в `output_dir` |
+| `output_dir` | `str` | `"logs/traces"` | Папка для файловых отчётов (нужна только при `save_to_dir`) |
 | `print_to_stdout` | `bool` | `False` | Печатать полное дерево в stdout (иначе — только ссылка на отчёт) |
 | `max_str_len` | `int` | `1000` | Макс. длина строкового значения; применяется к каждой физической строке |
 | `max_line_len` | `int` | `1000` | Макс. длина одной физической строки в выводе нестандартного объекта (`__str__`/`repr`/rich) |
 | `collapse_passthrough` | `bool` | `True` | Схлопывать транзитные цепочки вызовов в одну хлебную крошку |
 | `job_id` | `str` | `""` | ID задачи CI (для ссылок на артефакты) |
 | `artifact_url_pattern` | `str` | `""` | Шаблон URL артефакта: `{job_id}`, `{path}` |
-| `workdir_subpath` | `str` | `"tests/e2e"` | Подпуть рабочей директории в репозитории |
-
----
-
-## Сокращение длинных значений
-
-Сокращение живёт в слое отображения: в собранном дереве всегда лежит полное
-значение, а каждый рендерер решает, что с ним делать. В HTML сокращение
-**обратимо** — скрытый хвост остаётся в документе, раскрывается кликом по `…`
-и находится поиском по отчёту; в stdout и дереве тестов IDE раскрыть нечего,
-поэтому там обрезка жёсткая, а полная версия доступна в артефакте.
-
-Правила:
-
-| Что | Как сокращается |
-|-----|-----------------|
-| `dict` / `list` / `tuple` | рекурсивно, структура не режется — сокращаются только строки-листья |
-| `str` | лимит `max_str_len` на **каждую физическую строку** (переносы разделяют) |
-| `bytes` | `[bytes, 672 bytes, preview=b'\x89PNG…']` |
-| объект через `__str__`/`repr`/rich | лимит `max_line_len` на **каждую физическую строку** независимо; многострочная структура сохраняется |
-
-Рядом с сокращённым значением печатается его реальный размер: `[str, 7177 chars]`.
-
-## Исключение шума из дерева
-
-`exclude_paths` и `exclude_functions` означают «не создавать узел для вызовов
-отсюда», а не «перестать следить за тем, что отсюда вызвали». Вложенные
-целевые вызовы остаются в дереве и прицепляются к ближайшему не исключённому
-предку:
-
-```
-import_photo (contexts)                 ← целевой, узел есть
-└── PhotoCli ▸ import_media (cli)       ← целевой, узел есть
-    └── DockerClient ▸ exec_run         ← ИСКЛЮЧЁН: узла нет
-        └── worker_call (contexts)      ← узел есть, прицепится к import_media
-```
-
-## Схлопывание транзитных цепочек
-
-Вызов-обёртка без собственных переменных, с ровно одним вложенным вызовом и
-тем же возвращаемым объектом печатал одно и то же значение на каждом уровне.
-При `collapse_passthrough = True` такая цепочка схлопывается в один узел без
-потерь — имена всех звеньев остаются в хлебной крошке:
-
-```
-✔ PhotoCli ▸ import_media → _exec_command → DockerClient ▸ exec_run (interfaces.cli)  ⏱ 0.13s
-```
-
-Завершённые `asyncio.Future`/`Task` показываются как `[Future] <результат>`
-вместо `<Future finished result=True>`.
+| `workdir_subpath` | `str` | `""` | Подпуть рабочей директории в репозитории; задайте, если тесты запускаются из вложенной директории |
 
 ---
 
@@ -115,7 +69,9 @@ import_photo (contexts)                 ← целевой, узел есть
 ```python
 # vedro.cfg.py
 import os
-from shared_e2e_modules.plugins import VedroStepTracer
+import vedro
+
+from vedro_step_tracer import ReportType, VedroStepTracer
 
 
 class Config(vedro.Config):
@@ -124,16 +80,20 @@ class Config(vedro.Config):
 
         class StepTracer(VedroStepTracer):
             enabled = True
-            target_dirs = ['helpers/kafka', 'contexts', 'interfaces']
-            exclude_paths = ['interfaces/cli/_docker_client.py']
+            target_dirs = ['helpers', 'contexts', 'interfaces']
+            exclude_paths = ['interfaces/generated_client.py']
+
+            # Подробности и остальные виды правил — см. docs/exclude.md.
+            extra_exclude_value_types = [var('process', function='run_vedro')]
 
             # Отчёт уходит файлом в артефакты сценария; stdout остаётся читаемым.
             attach_artifacts = True
             print_to_stdout = False
+            report_formats = [ReportType.HTML]  # или [ReportType.HTML, ReportType.MARKDOWN]
 
             output_dir = 'logs/traces'
             save_to_dir = bool(os.environ.get('CI_JOB_ID'))
 
             job_id = os.environ.get('CI_JOB_ID')
-            artifact_url_pattern = 'https://gitlab.com/project/-/jobs/{job_id}/artifacts/file/{path}'
+            artifact_url_pattern = 'https://gitlab.example.com/group/SomeProject/-/jobs/{job_id}/artifacts/file/{path}'
 ```

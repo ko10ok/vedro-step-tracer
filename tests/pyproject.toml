@@ -1,0 +1,15 @@
+[project]
+name = "vedro-step-tracer-tests"
+version = "0.1.0"
+description = "Standalone unit/e2e test suite for the vedro_step_tracer plugin"
+requires-python = ">=3.9"
+dependencies = [
+    "vedro>=1.10,<2",
+    "vedro-step-tracer",
+]
+
+[tool.uv.sources]
+vedro-step-tracer = { path = "..", editable = true }
+
+[tool.uv]
+package = false
