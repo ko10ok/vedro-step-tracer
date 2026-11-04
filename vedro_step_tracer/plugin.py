@@ -514,9 +514,12 @@ class VedroStepTracerPlugin(Plugin):
 
     async def on_cleanup(self, event: CleanupEvent) -> None:
         """
-        Конец прогона — компактная сводка упавших сценариев со ссылками
-        на их трейсы: в пачке из десятков сценариев иначе приходится
-        отматывать весь лог, чтобы понять, что именно упало.
+        Конец прогона — компактная сводка упавших сценариев: в пачке из
+        десятков сценариев иначе приходится отматывать весь лог, чтобы
+        понять, что именно упало.
+
+        Ссылка на отчёт здесь не повторяется — её уже печатает сам vedro
+        строкой extra_details сразу под упавшим сценарием.
         """
         if not self._failed_results:
             return
@@ -528,17 +531,10 @@ class VedroStepTracerPlugin(Plugin):
             index = getattr(scenario, "template_index", None)
             hint = f" [{index}]" if index is not None else ""
             lines.append(f"  • {subject}{hint}")
-            for detail in self._trace_details(scenario_result):
-                lines.append(f"      {detail}")
         sys.stdout.write("\n".join(lines) + "\n")
         sys.stdout.flush()
 
         self._failed_results = []
-
-    def _trace_details(self, scenario_result: Any) -> List[str]:
-        """Строки extra_details со ссылкой на отчёт трейсера."""
-        details = getattr(scenario_result, "extra_details", None) or []
-        return [d for d in details if "Trace report" in str(d)]
 
     def _save_to_file(self, content: str, fmt: str) -> Optional[str]:
         """Сохранить отчёт в лог-файл. Возвращает путь к файлу (в контейнере)."""

@@ -36,6 +36,8 @@ class Scenario(vedro.Scenario):
         assert "Failed scenarios: 1" in self.run.stdout
         assert "trace a failing call" in self.run.stdout
 
-    def and_the_summary_should_repeat_the_report_link(self):
+    def and_the_summary_should_not_repeat_the_report_link(self):
+        # Ссылку уже печатает сам vedro строкой extra_details сразу под
+        # упавшим сценарием — повторять её в сводке незачем.
         summary = self.run.stdout.split("Failed scenarios: 1", 1)[1]
-        assert "🔎 Trace report: file://" in summary
+        assert "🔎 Trace report" not in summary
