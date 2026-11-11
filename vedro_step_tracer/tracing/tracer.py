@@ -1,6 +1,7 @@
 """FunctionTracer — сбор дерева вызовов через sys.settrace()."""
 
 import fnmatch
+import inspect
 import os
 import sys
 from typing import Any, Callable, Dict, List, Optional, Set, Union
@@ -10,6 +11,11 @@ from ..exclude import EXCLUDED_PLACEHOLDER, ValueExcludeRules
 from .nodes import StepNode, VarNode, safe_copy
 
 __all__ = ("FunctionTracer",)
+
+# Флаги кода, при которых фрейм может быть возобновлён (async/generator):
+# такой фрейм даёт новое событие call на каждый resume, и его длительность —
+# это не один непрерывный интервал (см. nodes.StepNode.frame, tree.collapse_tree).
+_RESUMABLE_FLAGS = inspect.CO_GENERATOR | inspect.CO_COROUTINE | inspect.CO_ASYNC_GENERATOR
 
 
 def _fingerprint(value: Any) -> tuple:
@@ -334,6 +340,10 @@ class FunctionTracer:
 
         # Сохраняем имена аргументов функции
         code = frame.f_code
+        if code.co_flags & _RESUMABLE_FLAGS:
+            # Ссылка на тот же объект фрейма на каждом resume — признак того,
+            # что последовательные узлы с этим именем являются одним вызовом.
+            node.frame = frame
         arg_count = code.co_argcount + code.co_kwonlyargcount
         node.arg_names = list(code.co_varnames[:arg_count])
 

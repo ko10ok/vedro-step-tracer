@@ -11,7 +11,7 @@ from vedro_step_tracer.exclude import ValueExcludeRules
 from vedro_step_tracer.tracing import FunctionTracer, collapse_tree
 from vedro_step_tracer.tracing.nodes import StepNode, VarNode
 
-__all__ = ("FakeStepSelf", "run_step",)
+__all__ = ("FakeStepSelf", "run_step", "run_step_async",)
 
 # target_dirs трейсера — сама эта директория: все функции в
 # unit/contexts/*.py (кроме этого файла) считаются трассируемыми.
@@ -59,6 +59,33 @@ def run_step(step: Callable[[Any], None],
     tracer.start()
     try:
         step(scenario)
+    finally:
+        call_tree = tracer.stop()
+    return collapse_tree(call_tree, passthrough=collapse) if collapse else call_tree
+
+
+async def run_step_async(step: Callable[[Any], Any],
+                         scenario: Optional[Any] = None,
+                         collapse: bool = True) -> List[Union[StepNode, VarNode]]:
+    """
+    Асинхронный вариант :func:`run_step` — для шагов, которые исполняют
+    корутины (``await``) в уже работающем цикле событий vedro. Ставит и снимает
+    тот же ``FunctionTracer``, но ``step`` здесь — ``async def``.
+    """
+    scenario = scenario if scenario is not None else FakeStepSelf()
+    initial_self_vars = dict(vars(scenario))
+    tracer = FunctionTracer(
+        [_TARGET_DIR],
+        initial_self_vars=initial_self_vars,
+        scenario_self=scenario,
+        step_name=step.__name__,
+        # Эта функция живёт в target-dir и сама возобновляется при await —
+        # без исключения она попала бы в дерево как лишний корневой вызов.
+        exclude_functions=["run_step_async"],
+    )
+    tracer.start()
+    try:
+        await step(scenario)
     finally:
         call_tree = tracer.stop()
     return collapse_tree(call_tree, passthrough=collapse) if collapse else call_tree

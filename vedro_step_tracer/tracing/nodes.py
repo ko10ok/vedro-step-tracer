@@ -45,7 +45,7 @@ class StepNode:
     __slots__ = (
         "name", "_orig_name", "module", "level", "status", "duration",
         "flags", "children", "started_at", "local_vars", "return_value",
-        "arg_names", "filename", "lineno",
+        "arg_names", "filename", "lineno", "frame",
     )
 
     def __init__(self, name: str, module: str, level: int, orig_name: str = "",
@@ -66,6 +66,11 @@ class StepNode:
         self.local_vars: Dict[str, Any] = {}
         self.return_value: Any = None
         self.arg_names: List[str] = []
+        # Фрейм вызова — только для корутин/генераторов (см. tracer._handle_call).
+        # Один и тот же объект фрейма переиспользуется при каждом resume, что
+        # позволяет отличить async-резюмы от отдельных вызовов с тем же именем
+        # при пост-обработке дерева (см. tree.collapse_tree).
+        self.frame: Any = None
 
     def close(self, status: str, local_vars: Dict[str, Any],
               return_value: Any = None) -> None:

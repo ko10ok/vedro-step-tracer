@@ -9,6 +9,7 @@
 переменная-кандидат на var-scoped исключение) для exclude_value_types.
 """
 
+import asyncio
 import socket
 from typing import Dict, List
 
@@ -60,6 +61,34 @@ def holds_a_socket() -> int:
     sock = socket.socket()
     sock.close()
     return 42
+
+
+def void_twice(n: int) -> None:
+    """Два отдельных вызова функции, возвращающей None, — не async-резюмы."""
+    void_call(n)
+    void_call(n)
+
+
+def void_call(n: int) -> None:
+    total = 0
+    for i in range(n):
+        total += i
+
+
+async def async_leaf(delay: float) -> str:
+    """Корутина с единственным await — её длительность должна включать ожидание."""
+    await asyncio.sleep(delay)
+    return "ok"
+
+
+async def async_returns_none(delay: float) -> None:
+    await asyncio.sleep(delay)
+
+
+async def async_twice(delay: float) -> None:
+    """Два отдельных await-вызова одной корутины — два разных фрейма."""
+    await async_returns_none(delay)
+    await async_returns_none(delay)
 
 
 def run_with_pipe_var(x: int) -> int:

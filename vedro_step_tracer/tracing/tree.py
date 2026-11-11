@@ -104,37 +104,54 @@ def collapse_tree(children: List[Union[StepNode, VarNode]],
             i += 1
             continue
 
-        # Собираем все подряд идущие StepNode с тем же именем
+        # Собираем все подряд идущие сегменты одного и того же вызова: то же
+        # имя и тот же объект фрейма. Разные вызовы одной функции (даже с
+        # одинаковым именем и возвращающие None) — это разные фреймы и потому
+        # разные узлы. Для обычных функций (frame отсутствует) резюмов не
+        # бывает — каждый узел самодостаточен.
         group = [item]
         j = i + 1
-        while j < len(children):
-            next_item = children[j]
-            if isinstance(next_item, StepNode) and next_item.name == item.name:
-                group.append(next_item)
-                j += 1
-            else:
-                break
+        if item.frame is not None:
+            while j < len(children):
+                next_item = children[j]
+                if (isinstance(next_item, StepNode)
+                        and next_item.name == item.name
+                        and next_item.frame is item.frame):
+                    group.append(next_item)
+                    j += 1
+                else:
+                    break
 
         if len(group) == 1:
             # Единственный вызов — рекурсивно схлопываем его children
             item.children = collapse_tree(item.children, passthrough)
+            item.frame = None
             result.append(collapse_passthrough(item) if passthrough else item)
         else:
-            # Проверяем: если промежуточные вызовы вернули None или async-объект
-            # (Future, Task, coroutine), это async-резюмы — схлопываем.
-            # Если вернули реальные значения — это отдельные вызовы.
+            # Async-резюмы — это один и тот же фрейм, возобновлённый несколько
+            # раз: у корутин/генераторов на каждый resume приходит новое
+            # событие call, но объект фрейма (а значит и вызов) один и тот же.
+            # Промежуточные сегменты при этом «возвращают» None или awaitable.
+            # Отдельные же вызовы одной функции (даже возвращающей None) — это
+            # разные фреймы, их схлопывать нельзя.
             intermediates = group[:-1]
-            is_async_resume = all(is_async_intermediate(n.return_value) for n in intermediates)
+            is_async_resume = all(
+                is_async_intermediate(n.return_value) for n in intermediates
+            )
 
             if is_async_resume:
-                # Async-резюмы — берём последний, суммируем время
+                # Async-резюмы — берём последний узел (с финальным return).
+                # Длительность — честный wall-clock интервал от первого входа
+                # до финального выхода: между сегментами корутина была
+                # приостановлена на await, и это время тоже входит в
+                # суммарное время вызова.
                 merged = group[-1]
-                total_duration = sum(
-                    (n.duration or 0) for n in group
-                )
-                merged.duration = total_duration if total_duration > 0 else None
+                first, last = group[0], group[-1]
+                span = (last.started_at + (last.duration or 0.0)) - first.started_at
+                merged.duration = span if span > 0 else None
                 all_children: List[Union[StepNode, VarNode]] = []
                 for node in group:
+                    node.frame = None
                     all_children.extend(node.children)
                 merged.children = collapse_tree(
                     dedup_repeated_vars(all_children), passthrough,
@@ -143,6 +160,7 @@ def collapse_tree(children: List[Union[StepNode, VarNode]],
             else:
                 # Отдельные вызовы — сохраняем каждый
                 for node in group:
+                    node.frame = None
                     node.children = collapse_tree(node.children, passthrough)
                     result.append(collapse_passthrough(node) if passthrough else node)
 
