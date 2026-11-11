@@ -40,12 +40,12 @@ class FixtureRun:
     scenario_path: str
 
     def html_reports(self, output_dir: str) -> List[Path]:
-        """HTML-отчёты, сохранённые напрямую в ``output_dir`` (save_to_dir=1)."""
+        """HTML-отчёты, сохранённые напрямую в ``output_dir`` (save_to_dir)."""
         pattern = str(_FIXTURE_PROJECT / output_dir / "*.html")
         return sorted(Path(p) for p in glob.glob(pattern))
 
     def markdown_reports(self, output_dir: str) -> List[Path]:
-        """Markdown-отчёты, сохранённые напрямую в ``output_dir`` (save_to_dir=1)."""
+        """Markdown-отчёты, сохранённые напрямую в ``output_dir`` (save_to_dir)."""
         pattern = str(_FIXTURE_PROJECT / output_dir / "*.md")
         return sorted(Path(p) for p in glob.glob(pattern))
 
@@ -100,6 +100,8 @@ def _reset_fixture_state() -> None:
     shutil.rmtree(_FIXTURE_PROJECT / ".vedro", ignore_errors=True)
     for reports_dir in _FIXTURE_PROJECT.glob("reports*"):
         shutil.rmtree(reports_dir, ignore_errors=True)
+    # save_to_dir по умолчанию пишет упавшие сценарии в logs/traces.
+    shutil.rmtree(_FIXTURE_PROJECT / "logs", ignore_errors=True)
     # На случай, если предыдущий прогон был прерван до cleanup в finally.
     for leftover in _FIXTURE_PROJECT.glob(f"scenarios/{_GENERATED_PREFIX}*.py"):
         leftover.unlink(missing_ok=True)

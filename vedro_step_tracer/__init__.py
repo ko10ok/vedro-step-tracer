@@ -16,7 +16,8 @@ Vedro plugin: автоматический трейсинг вызовов фу�
 from . import exclude
 from .config import ReportType, VedroStepTracer
 from .plugin import VedroStepTracerPlugin
+from .test_status import TestStatus
 
 __all__ = (
-    "VedroStepTracer", "VedroStepTracerPlugin", "ReportType", "exclude",
+    "VedroStepTracer", "VedroStepTracerPlugin", "ReportType", "TestStatus", "exclude",
 )

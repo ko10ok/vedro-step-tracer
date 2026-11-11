@@ -52,8 +52,8 @@ python -m vedro run --tr --tr-no-color
 | `extra_exclude_value_types` | `list[...]` | `[]` | То же самое поверх `exclude_value_types`, без переписывания базового списка — см. [`docs/exclude.md`](docs/exclude.md) |
 | `attach_artifacts` | `bool` | `True` | Сохранять отчёт в директорию артефактов сценария |
 | `report_formats` | `list[str]` | `[ReportType.HTML]` | Формат(ы) файлового отчёта: `ReportType.HTML`/`ReportType.MARKDOWN` или просто текстом `"html"`/`"markdown"` (без учёта регистра); оба сразу — `[ReportType.HTML, ReportType.MARKDOWN]` |
-| `save_to_dir` | `bool` | `False` | Дополнительно сохранять отчёт в `output_dir` |
-| `output_dir` | `str` | `"logs/traces"` | Папка для файловых отчётов (нужна только при `save_to_dir`) |
+| `save_to_dir` | `list[str]` | `["failed"]` | События для сохранения отчёта в `output_dir`: `"failed"` и/или `"passed"`; при `--tr` файл пишется всегда |
+| `output_dir` | `str` | `"logs/traces"` | Папка для файловых отчётов (нужна только при непустом `save_to_dir`) |
 | `print_to_stdout` | `bool` | `False` | Печатать полное дерево в stdout (иначе — только ссылка на отчёт) |
 | `max_str_len` | `int` | `1000` | Макс. длина строкового значения; применяется к каждой физической строке |
 | `max_line_len` | `int` | `1000` | Макс. длина одной физической строки в выводе нестандартного объекта (`__str__`/`repr`/rich) |
@@ -92,7 +92,7 @@ class Config(vedro.Config):
             report_formats = [ReportType.HTML]  # или [ReportType.HTML, ReportType.MARKDOWN]
 
             output_dir = 'logs/traces'
-            save_to_dir = bool(os.environ.get('CI_JOB_ID'))
+            save_to_dir = ["failed"]  # или ["failed", "passed"]
 
             job_id = os.environ.get('CI_JOB_ID')
             artifact_url_pattern = 'https://gitlab.example.com/group/SomeProject/-/jobs/{job_id}/artifacts/file/{path}'

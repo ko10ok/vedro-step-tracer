@@ -31,6 +31,7 @@ from .reporting.markdown import MarkdownTreeWriter
 from .reporting.teamcity import TeamCityTreeWriter
 from .reporting.terminal import TreeWriter
 from .report_types import ReportType
+from .test_status import TestStatus
 from .tracing import FunctionTracer, RootStep, collapse_tree
 
 if TYPE_CHECKING:
@@ -49,6 +50,47 @@ _ARTIFACT_NAMES: Dict[str, str] = {
     fmt: f"vedro-step-tracer.{ext}" for fmt, ext in _FORMAT_EXTENSIONS.items()
 }
 _VALID_REPORT_FORMATS = frozenset(_FORMAT_EXTENSIONS)
+
+_REPORT_EVENTS = frozenset((TestStatus.FAILED, TestStatus.PASSED))
+_SAVE_TO_DIR_DEFAULT = [TestStatus.FAILED]
+
+
+def _parse_save_to_dir(value: Any) -> List[str]:
+    """
+    Нормализовать ``save_to_dir`` в список событий.
+
+    Принимает список/кортеж строк, строку через запятую или bool (для
+    обратной совместимости: ``True`` == ``["failed"]``, ``False`` == ``[]``).
+    Неизвестные значения игнорируются, повторы убираются.
+    """
+    if value is None:
+        return list(_SAVE_TO_DIR_DEFAULT)
+    if isinstance(value, bool):
+        return list(_SAVE_TO_DIR_DEFAULT) if value else []
+    if isinstance(value, str):
+        raw = value.split(",")
+    else:
+        try:
+            raw = list(value)
+        except TypeError:
+            return list(_SAVE_TO_DIR_DEFAULT)
+
+    events: List[str] = []
+    for item in raw:
+        if isinstance(item, bool):
+            if item and TestStatus.FAILED not in events:
+                events.append(TestStatus.FAILED)
+            continue
+        name = str(item).strip().lower()
+        if not name:
+            continue
+        if name in ("1", "true", "yes", "on"):
+            name = TestStatus.FAILED
+        elif name in ("0", "false", "no", "off"):
+            continue
+        if name in _REPORT_EVENTS and name not in events:
+            events.append(name)
+    return events
 
 
 class VedroStepTracerPlugin(Plugin):
@@ -69,7 +111,10 @@ class VedroStepTracerPlugin(Plugin):
         self._max_str_len: int = getattr(config, "max_str_len", 1000)
         self._max_line_len: int = getattr(config, "max_line_len", 1000)
         self._attach_artifacts: bool = getattr(config, "attach_artifacts", True)
-        self._save_to_dir: bool = getattr(config, "save_to_dir", False)
+        self._save_to_dir_events: List[str] = _parse_save_to_dir(
+            getattr(config, "save_to_dir", _SAVE_TO_DIR_DEFAULT)
+        )
+        self._save_to_dir: bool = bool(self._save_to_dir_events)
         # Формат(ы) файлового отчёта — ReportType.HTML/MARKDOWN либо просто
         # текст "html"/"markdown" без учёта регистра (см. VedroStepTracer.report_formats).
         self._report_formats: List[str] = self._parse_report_formats(
@@ -390,15 +435,15 @@ class VedroStepTracerPlugin(Plugin):
 
     async def on_scenario_failed(self, event: ScenarioFailedEvent) -> None:
         """Сценарий упал — отчёт нужен всегда."""
-        self._publish_report(event.scenario_result)
+        self._publish_report(event.scenario_result, failed=True)
         self._failed_results.append(event.scenario_result)
 
     async def on_scenario_passed(self, event: ScenarioPassedEvent) -> None:
-        """Сценарий прошёл — отчёт нужен только при явном --tr."""
-        if self._interactive:
-            self._publish_report(event.scenario_result)
+        """Сценарий прошёл — отчёт нужен при --tr или для события passed."""
+        if self._interactive or TestStatus.PASSED in self._save_to_dir_events:
+            self._publish_report(event.scenario_result, failed=False)
 
-    def _publish_report(self, scenario_result: Any) -> None:
+    def _publish_report(self, scenario_result: Any, failed: bool) -> None:
         """
         Собрать отчёт и отдать его файлом: в директории артефактов сценария
         и/или в output_dir. В результате сценария остаётся только ссылка.
@@ -408,6 +453,15 @@ class VedroStepTracerPlugin(Plugin):
         """
         if not self._scenario_steps or self._report_saved:
             return
+
+        event = TestStatus.FAILED if failed else TestStatus.PASSED
+        write_artifact = self._attach_artifacts and (self._interactive or failed)
+        write_file = self._save_to_dir and (
+            self._interactive or event in self._save_to_dir_events
+        )
+        if not (write_artifact or write_file):
+            return
+
         self._report_saved = True
         self._report_links = []
 
@@ -415,12 +469,12 @@ class VedroStepTracerPlugin(Plugin):
             content = self._render_report(fmt)
             link = None
 
-            if self._attach_artifacts:
+            if write_artifact:
                 filepath = self._write_artifact(scenario_result, content, fmt)
                 if filepath is not None:
                     link = self._report_link_for(str(filepath))
 
-            if self._save_to_dir:
+            if write_file:
                 filepath = self._save_to_file(content, fmt)
                 if filepath is not None:
                     link = self._report_link_for(filepath)

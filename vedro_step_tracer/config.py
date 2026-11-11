@@ -7,8 +7,9 @@ from vedro.core import PluginConfig
 from .exclude import DEFAULT_EXCLUDED_VALUE_TYPES, ExcludeRule
 from .plugin import VedroStepTracerPlugin
 from .report_types import ReportType
+from .test_status import TestStatus
 
-__all__ = ("VedroStepTracer", "ReportType",)
+__all__ = ("VedroStepTracer", "ReportType", "TestStatus",)
 
 
 class VedroStepTracer(PluginConfig):
@@ -40,7 +41,7 @@ class VedroStepTracer(PluginConfig):
     # возможностей, без необходимости переписывать базовый список целиком.
     extra_exclude_value_types: List[ExcludeRule] = []
 
-    # Куда сохранять логи (используется только при save_to_dir = True)
+    # Куда сохранять файловые отчёты (используется только при непустом save_to_dir)
     output_dir: str = "logs/traces"
 
     # Сохранять отчёт в директорию артефактов сценария (.vedro/artifacts,
@@ -60,9 +61,9 @@ class VedroStepTracer(PluginConfig):
     # переменной окружения в CI: report_formats = os.environ['FORMATS'].split(',').
     report_formats: List[str] = [ReportType.HTML]
 
-    # Дополнительно сохранять HTML-отчёт в output_dir. Прежнее поведение;
-    # нужно там, где артефакты vedro не собираются (например, часть job'ов CI).
-    save_to_dir: bool = False
+    # События, по которым сохранять отчёт в output_dir: "failed" и/или "passed".
+    # При --tr файл пишется всегда.
+    save_to_dir: List[str] = [TestStatus.FAILED]
 
     # Печатать полное дерево трейса в stdout. По умолчанию выключено: отчёт
     # уходит в артефакт, а в stdout остаётся только ссылка на него. Полное

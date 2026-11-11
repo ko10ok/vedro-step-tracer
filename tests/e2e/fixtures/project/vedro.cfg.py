@@ -11,7 +11,7 @@ attach_artifacts/save_to_dir/print_to_stdout из разных тестовых 
 import os
 
 import vedro
-from vedro_step_tracer import ReportType, VedroStepTracer
+from vedro_step_tracer import ReportType, TestStatus, VedroStepTracer
 from vedro_step_tracer.exclude import var
 
 
@@ -20,6 +20,25 @@ def _env_bool(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value == "1"
+
+
+def _env_save_to_dir(name: str, default: list) -> list:
+    """
+    Список событий для save_to_dir из переменной окружения.
+
+    ``TR_SAVE_TO_DIR`` принимает значения через запятую (``failed,passed``).
+    Для обратной совместимости ``1``/``true`` означают ``["failed"]``, а
+    ``0``/``false`` — пустой список.
+    """
+    value = os.environ.get(name)
+    if value is None:
+        return list(default)
+    value = value.strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return [TestStatus.FAILED]
+    if value in ("0", "false", "no", "off", ""):
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
 
 
 def _env_report_formats(name: str, default: str) -> list:
@@ -42,7 +61,7 @@ class Config(vedro.Config):
             enabled = True
             target_dirs = ["contexts"]
             attach_artifacts = _env_bool("TR_ATTACH_ARTIFACTS", True)
-            save_to_dir = _env_bool("TR_SAVE_TO_DIR", False)
+            save_to_dir = _env_save_to_dir("TR_SAVE_TO_DIR", [TestStatus.FAILED])
             report_formats = _env_report_formats("TR_REPORT_FORMATS", ReportType.HTML)
             output_dir = os.environ.get("TR_OUTPUT_DIR", "reports")
             print_to_stdout = _env_bool("TR_PRINT_TO_STDOUT", False)
