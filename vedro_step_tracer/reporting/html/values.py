@@ -4,7 +4,15 @@ from typing import Any, Union
 
 from rich.console import Console
 
-from ..shorten import Chunk, max_line_len, max_str_len, shorten_bytes, shorten_lines, str_note
+from ..shorten import (
+    Chunk,
+    chunks_truncated,
+    max_collection_items,
+    max_line_len,
+    shorten_bytes,
+    shorten_lines,
+    str_note,
+)
 from ..secrets import mask_secrets
 from ..unwrap import unwrap_async
 from .escaping import esc
@@ -133,7 +141,7 @@ def _html_chunks(text: str, limit: int, css_class: str) -> str:
     chunks = shorten_lines(text, limit)
     body = "<br>".join(_html_chunk(chunk) for chunk in chunks)
     rendered = f'<span class="{css_class}">{body}</span>'
-    if any(chunk.shortened for chunk in chunks):
+    if any(chunk.shortened for chunk in chunks) or chunks_truncated(text, chunks):
         rendered += f' <span class="v-size">{esc(str_note(len(text)))}</span>'
     return rendered
 
@@ -143,10 +151,10 @@ def html_str(value: str, shortable: bool = True) -> str:
     if not shortable:
         escaped = esc(value).replace("\n", "<br>")
         return f'<span class="v-str">{escaped}</span>'
-    chunks = shorten_lines(value, max_str_len())
+    chunks = shorten_lines(value, max_line_len())
     body = "<br>".join(_html_chunk(chunk) for chunk in chunks)
     rendered = f'<span class="v-str">\'{body}\'</span>'
-    if any(chunk.shortened for chunk in chunks):
+    if any(chunk.shortened for chunk in chunks) or chunks_truncated(value, chunks):
         rendered += f' <span class="v-size">{esc(str_note(len(value)))}</span>'
     return rendered
 
@@ -163,12 +171,21 @@ def html_dict(d: dict, depth: int) -> str:
         f'<span class="v-fold-hint"> {esc(preview)} </span>'
         f'</summary><div class="v-body">'
     ]
-    for k, v in d.items():
+    limit = max_collection_items()
+    items = list(d.items())
+    if len(items) > limit:
+        omitted = len(items) - limit
+        items = items[:limit]
+    else:
+        omitted = 0
+    for k, v in items:
         v_html = html_value(v, depth + 1)
         parts.append(
             f'<div class="v-entry"><span class="v-key">{esc(k)}</span>'
             f'<span class="v-dim">:</span> {v_html}</div>'
         )
+    if omitted:
+        parts.append(f'<div class="v-entry"><span class="v-dim">… ещё {omitted}</span></div>')
     parts.append('</div><span class="v-brace">}</span></details>')
     return "".join(parts)
 
@@ -191,9 +208,15 @@ def html_list(lst: Union[list, tuple], depth: int) -> str:
         f'<span class="v-fold-hint"> {hint} </span>'
         f'</summary><div class="v-body">'
     ]
-    for i, v in enumerate(lst):
+    limit = max_collection_items()
+    shown = lst[:limit]
+    for i, v in enumerate(shown):
         v_html = html_value(v, depth + 1)
         parts.append(f'<div class="v-entry"><span class="v-dim">[{i}]</span> {v_html}</div>')
+    if len(lst) > limit:
+        parts.append(
+            f'<div class="v-entry"><span class="v-dim">… ещё {len(lst) - limit}</span></div>'
+        )
     parts.append(f'</div><span class="v-brace">{esc(cb)}</span></details>')
     return "".join(parts)
 

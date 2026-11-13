@@ -108,8 +108,11 @@ class VedroStepTracerPlugin(Plugin):
             ["helpers", "contexts", "interfaces"]
         )
         self._print_to_stdout: bool = getattr(config, "print_to_stdout", False)
-        self._max_str_len: int = getattr(config, "max_str_len", 1000)
         self._max_line_len: int = getattr(config, "max_line_len", 1000)
+        self._max_hidden_len: int = getattr(config, "max_hidden_len", 20_000)
+        self._max_total_len: int = getattr(config, "max_total_len", 50_000)
+        self._max_lines: int = getattr(config, "max_lines", 1_000)
+        self._max_collection_items: int = getattr(config, "max_collection_items", 1_000)
         self._attach_artifacts: bool = getattr(config, "attach_artifacts", True)
         self._save_to_dir_events: List[str] = _parse_save_to_dir(
             getattr(config, "save_to_dir", _SAVE_TO_DIR_DEFAULT)
@@ -162,8 +165,11 @@ class VedroStepTracerPlugin(Plugin):
         # Глифы дерева в выводе TeamCity (см. VedroStepTracer.teamcity_tree_prefix).
         self._teamcity_tree_prefix: bool = getattr(config, "teamcity_tree_prefix", True)
 
-        settings.set_max_str_len(self._max_str_len)
         settings.set_max_line_len(self._max_line_len)
+        settings.set_max_hidden_len(self._max_hidden_len)
+        settings.set_max_total_len(self._max_total_len)
+        settings.set_max_lines(self._max_lines)
+        settings.set_max_collection_items(self._max_collection_items)
 
         self._project_root: str = ""
         self._tracer: Optional[FunctionTracer] = None

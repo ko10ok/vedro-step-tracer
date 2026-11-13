@@ -7,8 +7,9 @@ from rich.markup import escape as markup_escape
 
 from ..shorten import (
     Chunk,
+    chunks_truncated,
+    max_collection_items,
     max_line_len,
-    max_str_len,
     shorten_bytes,
     shorten_lines,
     str_note,
@@ -63,7 +64,7 @@ def _markup_chunks(text: str, limit: int, cont_prefix: str, style: str) -> str:
     HTML-артефакте, где `…` раскрывается по клику.
     """
     chunks = shorten_lines(text, limit)
-    shortened = any(chunk.shortened for chunk in chunks)
+    shortened = any(chunk.shortened for chunk in chunks) or chunks_truncated(text, chunks)
     lines = [_markup_chunk(chunk, style) for chunk in chunks]
     rendered = ("\n" + cont_prefix).join(lines)
     if shortened:
@@ -105,8 +106,8 @@ def markup_str(value: str, cont_prefix: str) -> str:
         except Exception:
             pass
     if "\n" in value:
-        return _markup_chunks(value, max_str_len(), cont_prefix, "green")
-    chunk = shorten_lines(value, max_str_len())[0]
+        return _markup_chunks(value, max_line_len(), cont_prefix, "green")
+    chunk = shorten_lines(value, max_line_len())[0]
     body = _markup_chunk(chunk, "green")
     rendered = f"[green]'[/green]{body}[green]'[/green]"
     if chunk.shortened:
@@ -118,14 +119,17 @@ def markup_dict(d: dict, cont_prefix: str, depth: int) -> str:
     """Словарь: разворачиваем рекурсивно через фигурные скобки."""
     if not d:
         return "[dim]{}[/dim]"
+    limit = max_collection_items()
     items = list(d.items())
     indent = cont_prefix + "    "
     parts = []
-    for k, v in items:
+    for k, v in items[:limit]:
         v_str = markup_value(v, indent, depth + 1)
         parts.append(
             f"\n{indent}[yellow]{markup_escape(str(k))}[/yellow][dim]:[/dim] {v_str}"
         )
+    if len(items) > limit:
+        parts.append(f"\n{indent}[dim]… ещё {len(items) - limit}[/dim]")
     return "[dim]{[/dim]" + "".join(parts) + f"\n{cont_prefix}[dim]}}[/dim]"
 
 
@@ -144,12 +148,15 @@ def markup_list(lst: Union[list, tuple], cont_prefix: str, depth: int) -> str:
                 "[dim], [/dim]".join(items) +
                 f"[dim]{br_close}[/dim]")
     # Разворачиваем
+    limit = max_collection_items()
     indent = cont_prefix + "    "
     parts = []
-    for i, v in enumerate(lst):
+    for i, v in enumerate(lst[:limit]):
         v_str = markup_value(v, indent, depth + 1)
         idx = markup_escape(f"[{i}]")
         parts.append(f"\n{indent}[dim]{idx}[/dim] {v_str}")
+    if len(lst) > limit:
+        parts.append(f"\n{indent}[dim]… ещё {len(lst) - limit}[/dim]")
     return (f"[dim]{br_open}[/dim]" +
             "".join(parts) +
             f"\n{cont_prefix}[dim]{br_close}[/dim]")

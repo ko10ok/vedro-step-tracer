@@ -10,3 +10,4 @@ htmlcov/
 .ruff_cache/
 build/
 dist/
+tests/traces/
