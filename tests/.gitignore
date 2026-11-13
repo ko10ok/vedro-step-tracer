@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.vedro/
+reports/
+reports_*/
+e2e/fixtures/project/scenarios/_case_*.py
