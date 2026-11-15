@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 from .. import settings
 from ..exclude import EXCLUDED_PLACEHOLDER, ValueExcludeRules
+from .events import CallEntered, CallReturned, TraceEvent, VarRecorded
 from .nodes import StepNode, VarNode, safe_copy
 
 __all__ = ("FunctionTracer",)
@@ -69,7 +70,8 @@ class FunctionTracer:
                  step_name: str = "",
                  exclude_paths: Optional[List[str]] = None,
                  exclude_functions: Optional[List[str]] = None,
-                 exclude_value_rules: Optional[ValueExcludeRules] = None) -> None:
+                 exclude_value_rules: Optional[ValueExcludeRules] = None,
+                 observers: Optional[List[Callable[[TraceEvent], None]]] = None) -> None:
         self.target_dirs = [os.path.abspath(d) for d in target_dirs]
         # Файлы и функции внутри target_dirs, которые не должны порождать
         # узлы дерева (шум вроде обёрток над docker SDK). Исключение
@@ -114,6 +116,7 @@ class FunctionTracer:
         self._locals_snapshots: Dict[int, Dict[str, tuple]] = {}
         # фреймы активных вызовов, синхронизированы с call_stack по индексам.
         self._active_frames: List[Any] = []
+        self._observers: List[Callable[[TraceEvent], None]] = list(observers or [])
 
     def start(self) -> None:
         """Установить трейсинг."""
@@ -134,9 +137,23 @@ class FunctionTracer:
         self._old_trace = None
         # Финальный сбор («на выходе» из шага): любые scope/locals изменения,
         # сделанные после последнего вложенного вызова, попадают в конец дерева.
-        self._emit_scope_diff(self.root_children)
-        self._emit_locals_diff(self._step_frame, self.root_children, self._root_locals_snapshot)
+        self._emit_scope_diff(None)
+        self._emit_locals_diff(self._step_frame, None, self._root_locals_snapshot)
         return self.root_children
+
+    def _publish(self, event: TraceEvent) -> None:
+        """
+        Разослать событие подписчикам.
+
+        Событие публикуется на горячем пути ``sys.settrace``, поэтому ошибка
+        подписчика не должна ломать сценарий: исключение гасится, дерево уже
+        построено, а потоковый вывод — вторичен по отношению к прогону.
+        """
+        for observer in self._observers:
+            try:
+                observer(event)
+            except Exception:
+                pass
 
     @property
     def step_locals(self) -> Dict[str, Any]:
@@ -250,7 +267,7 @@ class FunctionTracer:
             return EXCLUDED_PLACEHOLDER
         return safe_copy(value)
 
-    def _emit_scope_diff(self, target_children: List[Union[StepNode, VarNode]]) -> None:
+    def _emit_scope_diff(self, owner: Optional[StepNode]) -> None:
         """Сравнить текущие атрибуты self сценария со снимком и дописать новые/изменённые."""
         if self.scenario_self is None:
             return
@@ -261,13 +278,15 @@ class FunctionTracer:
             cur_fp = _fingerprint(value)
             prev_fp = self._self_snapshot.get(key)
             if prev_fp is None:
-                target_children.append(VarNode(key, self._safe_capture(value, key), kind="scope"))
+                self._append_var(owner, VarNode(key, self._safe_capture(value, key), kind="scope"))
                 self._self_snapshot[key] = cur_fp
             elif prev_fp != cur_fp:
-                target_children.append(VarNode(key, self._safe_capture(value, key), kind="scope_changed"))
+                self._append_var(owner, VarNode(
+                    key, self._safe_capture(value, key), kind="scope_changed",
+                ))
                 self._self_snapshot[key] = cur_fp
 
-    def _emit_locals_diff(self, frame: Any, target_children: List[Union[StepNode, VarNode]],
+    def _emit_locals_diff(self, frame: Any, owner: Optional[StepNode],
                           snapshot: Dict[str, tuple]) -> None:
         """Сравнить локальные переменные фрейма со снимком и дописать новые/изменённые."""
         if frame is None:
@@ -284,10 +303,26 @@ class FunctionTracer:
             cur_fp = _fingerprint(value)
             prev_fp = snapshot.get(key)
             if prev_fp is None or prev_fp != cur_fp:
-                target_children.append(
-                    VarNode(key, self._safe_capture(value, key, function, module), kind="local")
-                )
+                self._append_var(owner, VarNode(
+                    key, self._safe_capture(value, key, function, module), kind="local",
+                ))
                 snapshot[key] = cur_fp
+
+    def _append_var(self, owner: Optional[StepNode], var: VarNode) -> None:
+        """
+        Добавить переменную в дерево и уведомить подписчиков.
+
+        ``owner=None`` — верхний уровень шага. Отдельный метод нужен, чтобы
+        правило «куда и когда попадает переменная» оставалось ровно одним —
+        и для дерева, и для потокового вывода.
+        """
+        if owner is None:
+            self.root_children.append(var)
+        else:
+            owner.children.append(var)
+        if self._observers:
+            self._publish(VarRecorded(owner, var))
+
 
     def _flush_before_call(self) -> None:
         """
@@ -301,11 +336,11 @@ class FunctionTracer:
             owner_frame = self._active_frames[-1] if self._active_frames else None
             snapshot = self._locals_snapshots.setdefault(id(owner_frame), {}) \
                 if owner_frame is not None else {}
-            self._emit_scope_diff(parent.children)
-            self._emit_locals_diff(owner_frame, parent.children, snapshot)
+            self._emit_scope_diff(parent)
+            self._emit_locals_diff(owner_frame, parent, snapshot)
         else:
-            self._emit_scope_diff(self.root_children)
-            self._emit_locals_diff(self._step_frame, self.root_children, self._root_locals_snapshot)
+            self._emit_scope_diff(None)
+            self._emit_locals_diff(self._step_frame, None, self._root_locals_snapshot)
 
     def _handle_call(self, frame: Any) -> None:
         """
@@ -363,12 +398,17 @@ class FunctionTracer:
         self._locals_snapshots[id(frame)] = own_snapshot
 
         if self.call_stack:
-            self.call_stack[-1].children.append(node)
+            parent = self.call_stack[-1]
+            parent.children.append(node)
         else:
+            parent = None
             self.root_children.append(node)
 
         self.call_stack.append(node)
         self._active_frames.append(frame)
+
+        if self._observers:
+            self._publish(CallEntered(node, parent))
 
     def _handle_return(self, frame: Any, return_value: Any) -> None:
         """
@@ -395,6 +435,8 @@ class FunctionTracer:
                         if orphan_frame is not None:
                             self._locals_snapshots.pop(id(orphan_frame), None)
                         orphan.close("ERROR", {})
+                        if self._observers:
+                            self._publish(CallReturned(orphan))
                     current = self.call_stack[-1]
                     break
             else:
@@ -403,8 +445,8 @@ class FunctionTracer:
         # Сбор состояния «на выходе» из функции: любые локальные переменные и
         # scope-изменения, сделанные после последнего вложенного вызова.
         own_snapshot = self._locals_snapshots.get(id(frame), {})
-        self._emit_locals_diff(frame, current.children, own_snapshot)
-        self._emit_scope_diff(current.children)
+        self._emit_locals_diff(frame, current, own_snapshot)
+        self._emit_scope_diff(current)
         self._locals_snapshots.pop(id(frame), None)
 
         # Собираем locals (для обратной совместимости — используется, например,
@@ -428,6 +470,9 @@ class FunctionTracer:
         self.call_stack.pop()
         if self._active_frames:
             self._active_frames.pop()
+
+        if self._observers:
+            self._publish(CallReturned(current))
 
     def _collect_locals(self, frame: Any) -> Dict[str, Any]:
         """Собрать локальные переменные, отфильтровав служебные."""

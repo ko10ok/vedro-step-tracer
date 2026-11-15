@@ -33,6 +33,7 @@ from .reporting.terminal import TreeWriter
 from .report_types import ReportType
 from .test_status import TestStatus
 from .tracing import FunctionTracer, RootStep, collapse_tree
+from .tracing.events import CallEntered, CallReturned, TraceEvent, VarRecorded
 
 if TYPE_CHECKING:
     from .config import VedroStepTracer
@@ -162,8 +163,19 @@ class VedroStepTracerPlugin(Plugin):
             ["PYCHARM_HOSTED", "TEAMCITY_VERSION", "PYCHARM_HELPERS_DIR"],
         )
         self._teamcity: bool = False
+        self._teamcity_stream: bool = bool(getattr(config, "teamcity_stream", True))
         # Глифы дерева в выводе TeamCity (см. VedroStepTracer.teamcity_tree_prefix).
         self._teamcity_tree_prefix: bool = getattr(config, "teamcity_tree_prefix", True)
+        self._stdout: Any = sys.stdout
+        self._stderr: Any = sys.stderr
+        self._stream_active: bool = False
+        self._timing_enabled: bool = False
+        self._stream_time: float = 0.0
+        self._collapse_time: float = 0.0
+        self._report_time: float = 0.0
+        self._step_wall_start: float = 0.0
+        self._nodes_streamed: int = 0
+        self._step_timings: List[Tuple[str, float, float, int]] = []
 
         settings.set_max_line_len(self._max_line_len)
         settings.set_max_hidden_len(self._max_hidden_len)
@@ -210,7 +222,7 @@ class VedroStepTracerPlugin(Plugin):
         dispatcher.listen(ConfigLoadedEvent, self.on_config_loaded)
         dispatcher.listen(ArgParseEvent, self.on_arg_parse)
         dispatcher.listen(ArgParsedEvent, self.on_arg_parsed)
-        dispatcher.listen(ScenarioRunEvent, self.on_scenario_run)
+        dispatcher.listen(ScenarioRunEvent, self.on_scenario_run, priority=-1)
         dispatcher.listen(StepRunEvent, self.on_step_run)
         dispatcher.listen(StepPassedEvent, self.on_step_passed)
         dispatcher.listen(StepFailedEvent, self.on_step_failed)
@@ -287,6 +299,9 @@ class VedroStepTracerPlugin(Plugin):
 
     async def on_arg_parsed(self, event: ArgParsedEvent) -> None:
         """Определяем корень проекта и читаем флаг --tr."""
+        self._stdout = sys.stdout
+        self._stderr = sys.stderr
+        self._timing_enabled = bool(os.environ.get("VEDRO_STEP_TRACER_TIMING"))
         tr_value = getattr(event.args, "tr", None)
         tr_gitlab_arg = getattr(event.args, "tr_gitlab", None)
         # Флаг явно не передан — определяем режим GitLab CI автоматически
@@ -301,10 +316,12 @@ class VedroStepTracerPlugin(Plugin):
         no_color = getattr(event.args, "tr_no_color", False)
         self._writer = TreeWriter(verbosity=self._verbosity, color=not no_color, gitlab=gitlab)
         self._teamcity = self._detect_teamcity(event)
+        self._stream_active = self._teamcity and self._teamcity_stream
         self._teamcity_writer = TeamCityTreeWriter(
             verbosity=self._verbosity if tr_value is not None else 2,
             tree_prefix=self._teamcity_tree_prefix,
             path_resolver=self._to_host_path,
+            stream=self._write_stream if self._stream_active else None,
         )
 
         self._project_root = os.getcwd()
@@ -358,6 +375,14 @@ class VedroStepTracerPlugin(Plugin):
         self._scenario_cls = getattr(scenario, "_orig_scenario", None) or type(scenario)
         self._scenario_instance = None
         self._self_snapshot_before = {}
+        self._step_timings = []
+        self._stream_time = 0.0
+        self._collapse_time = 0.0
+        self._report_time = 0.0
+        if self._stream_active:
+            self._teamcity_writer.start_scenario(
+                self._display_scenario_name(), self._scenario_path,
+            )
 
     async def on_step_run(self, event: StepRunEvent) -> None:
         """Начало шага — устанавливаем трейсинг."""
@@ -382,8 +407,15 @@ class VedroStepTracerPlugin(Plugin):
                                       step_name=step_name,
                                       exclude_paths=self._exclude_paths,
                                       exclude_functions=self._exclude_functions,
-                                      exclude_value_rules=self._exclude_value_rules)
+                                      exclude_value_rules=self._exclude_value_rules,
+                                      observers=[self._on_trace_event]
+                                      if self._stream_active else None)
         self._tracer.start()
+
+        if self._stream_active:
+            self._step_wall_start = time.perf_counter()
+            self._nodes_streamed = 0
+            self._teamcity_writer.start_step(self._current_root_step)
 
     async def on_step_passed(self, event: StepPassedEvent) -> None:
         """Шаг успешен — собираем результаты трейсинга."""
@@ -397,6 +429,8 @@ class VedroStepTracerPlugin(Plugin):
     def _finalize_step(self, status: str, step_result: Any) -> None:
         """Завершить трейсинг шага и сохранить результат."""
         if self._tracer is None or self._current_root_step is None:
+            if self._stream_active:
+                self._teamcity_writer.abort_step()
             return
 
         # Останавливаем трейсер (внутри также дописывает в call_tree
@@ -413,9 +447,11 @@ class VedroStepTracerPlugin(Plugin):
 
         # Закрываем корневой шаг
         self._current_root_step.close(status)
+        collapse_start = time.perf_counter()
         self._current_root_step.call_tree = collapse_tree(
             call_tree, passthrough=self._collapse_passthrough,
         )
+        self._collapse_time += time.perf_counter() - collapse_start
 
         # Для упавшего шага сохраняем исходный код в месте падения и текст
         # ошибки — нужны только для HTML-отчёта (в терминале traceback уже
@@ -430,6 +466,16 @@ class VedroStepTracerPlugin(Plugin):
                     exc_info.traceback, self._scenario_path, self._to_relative_path
                 )
                 self._current_root_step.failure_error = render_error_text(exc_info.value)
+
+        if self._stream_active:
+            wall = time.perf_counter() - self._step_wall_start
+            self._teamcity_writer.finish_step(self._current_root_step)
+            self._step_timings.append((
+                self._current_root_step.name,
+                self._current_root_step.duration or 0.0,
+                wall,
+                self._nodes_streamed,
+            ))
 
         self._scenario_steps.append(self._current_root_step)
 
@@ -471,6 +517,7 @@ class VedroStepTracerPlugin(Plugin):
         self._report_saved = True
         self._report_links = []
 
+        report_start = time.perf_counter()
         for fmt in self._report_formats:
             content = self._render_report(fmt)
             link = None
@@ -487,6 +534,7 @@ class VedroStepTracerPlugin(Plugin):
 
             if link:
                 self._report_links.append((fmt, link))
+        self._report_time += time.perf_counter() - report_start
 
         # Один активный формат — строка остаётся прежней (обратная
         # совместимость), несколько — формат указывается в скобках, чтобы
@@ -538,15 +586,20 @@ class VedroStepTracerPlugin(Plugin):
         return self._make_terminal_link(self._to_host_path(filepath))
 
     async def on_scenario_reported(self, event: ScenarioReportedEvent) -> None:
-        """Сценарий завершён — выводим накопленный трейс в stdout."""
+        """Сценарий завершён — закрываем дерево и выводим накопленный трейс."""
+        if self._stream_active:
+            self._teamcity_writer.finish_scenario()
+            self._emit_timing()
+
         if not self._scenario_steps:
+            self._reset_scenario_state()
             return
 
         # Полное дерево в stdout печатается, только если это включено конфигом
         # и сценарий упал. По умолчанию отчёт уходит файлом в артефакты, а в
         # результате сценария остаётся ссылка на него.
         should_print = self._print_to_stdout and self._scenario_failed
-        if self._teamcity:
+        if self._teamcity and not self._stream_active:
             # В режиме тест-раннера шаги и значения показываются деревом, и
             # дублировать их текстом — только засорять консоль IDE. Дерево
             # выводится всегда: ради него режим и включают.
@@ -556,7 +609,7 @@ class VedroStepTracerPlugin(Plugin):
                 self._display_scenario_name(), self._scenario_steps, self._scenario_path,
             ))
             sys.stdout.flush()
-        elif should_print:
+        elif should_print and not self._teamcity:
             separator = "═" * 78
             run_hint = f" [{self._scenario_index}]" if self._scenario_index is not None else ""
             if self._scenario_failed:
@@ -569,11 +622,55 @@ class VedroStepTracerPlugin(Plugin):
             sys.stdout.write(output)
             sys.stdout.flush()
 
-        # Сброс
+        self._reset_scenario_state()
+
+    def _reset_scenario_state(self) -> None:
+        """Сбросить состояние текущего сценария."""
         self._scenario_steps = []
         self._scenario_name = ""
         self._scenario_failed = False
         self._report_links = []
+
+    def _write_stream(self, chunk: str) -> None:
+        """Записать потоковое service-сообщение в настоящий stdout сразу."""
+        start = time.perf_counter()
+        self._stdout.write(chunk)
+        self._stdout.flush()
+        self._stream_time += time.perf_counter() - start
+
+    def _on_trace_event(self, event: TraceEvent) -> None:
+        """Подписчик трейсера: переводит события в потоковые сообщения TeamCity."""
+        if isinstance(event, CallEntered):
+            self._nodes_streamed += 1
+            self._teamcity_writer.enter_call(event.node)
+        elif isinstance(event, VarRecorded):
+            self._teamcity_writer.emit_var(event.var)
+        elif isinstance(event, CallReturned):
+            self._teamcity_writer.leave_call(event.node)
+
+    def _emit_timing(self) -> None:
+        """
+        Диагностика накладных расходов (VEDRO_STEP_TRACER_TIMING=1).
+
+        В stderr, а не в дерево: строки нужны для сравнения времени трейсера
+        (чистое выполнение) с wall-clock шага, в который входят наши записи,
+        схлопывание и сохранение отчётов.
+        """
+        if not self._timing_enabled:
+            return
+        lines = []
+        for name, tracer_duration, wall, nodes in self._step_timings:
+            lines.append(
+                f"timing: step={name} tracer={tracer_duration:.3f}s "
+                f"wall={wall:.3f}s nodes={nodes}"
+            )
+        lines.append(
+            f"timing: scenario={self._display_scenario_name()} "
+            f"stream={self._stream_time:.3f}s collapse={self._collapse_time:.3f}s "
+            f"report={self._report_time:.3f}s"
+        )
+        self._stderr.write("\n".join(lines) + "\n")
+        self._stderr.flush()
 
     def _display_scenario_name(self) -> str:
         """Имя сценария с индексом параметризации, если он есть."""
@@ -590,6 +687,9 @@ class VedroStepTracerPlugin(Plugin):
         Ссылка на отчёт здесь не повторяется — её уже печатает сам vedro
         строкой extra_details сразу под упавшим сценарием.
         """
+        if self._stream_active:
+            self._teamcity_writer.finish_scenario()
+
         if not self._failed_results:
             return
 

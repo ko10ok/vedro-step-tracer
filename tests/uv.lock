@@ -19,6 +19,19 @@ wheels = [
 ]
 
 [[package]]
+name = "d42"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "niltype" },
+    { name = "th" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3f/27/d8864b710a341bb5d9ea3488022e77f7c0065313ca73cc9df905ab64b3fc/d42-2.4.0.tar.gz", hash = "sha256:d89a150701c31642f8134771fd2325811bfd05f43273ba1f66e9a031fe16c845", size = 33324, upload-time = "2026-08-04T15:16:55.185Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e3/d1/32482287d1d0569955fa31beb3144bf409f1985afe2c410a676c8fa7d14c/d42-2.4.0-py3-none-any.whl", hash = "sha256:c11c12132d5d31689dd8311dc4dc80b61a75088ca646b721ec900eac2d83c021", size = 50632, upload-time = "2026-08-04T15:16:54.26Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "3.19.1"
 source = { registry = "https://pypi.org/simple" }
@@ -124,6 +137,18 @@ wheels = [
 ]
 
 [[package]]
+name = "th"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "niltype" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/10/57/48f5b321ca37e6973d3635fdb602a792d9ede7da2c7d0c46ff6d04e48e0f/th-0.4.1.tar.gz", hash = "sha256:5a0d99523cd98213e01e18395dc08155fcf81cc72e43be7e58b14a57b14ca5a9", size = 13824, upload-time = "2024-09-21T14:35:10.928Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2f/29/969d96eeb98abf22915ce59079ac77e0e7d1cdcf5750aa0b46e4b057233f/th-0.4.1-py3-none-any.whl", hash = "sha256:79beca528001f79687d5dafd01caa4186a22fb5cefd78af354b0a48d9b034002", size = 12521, upload-time = "2024-09-21T14:35:09.648Z" },
+]
+
+[[package]]
 name = "typing-extensions"
 version = "4.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -165,12 +190,14 @@ name = "vedro-step-tracer-tests"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "d42" },
     { name = "vedro" },
     { name = "vedro-step-tracer" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "d42" },
     { name = "vedro", specifier = ">=1.10,<2" },
     { name = "vedro-step-tracer", editable = "../" },
 ]

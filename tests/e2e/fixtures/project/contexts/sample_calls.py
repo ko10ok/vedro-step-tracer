@@ -17,6 +17,7 @@
   попадают в дерево.
 """
 
+import asyncio
 from typing import Dict, List
 
 
@@ -88,3 +89,8 @@ def summarize_user_ids(user_ids: List[int]) -> int:
     for value in user_ids:
         total += value
     return total
+
+
+async def async_fetch_user(user_id: int) -> Dict[str, object]:
+    await asyncio.sleep(0)
+    return fetch_user(user_id)

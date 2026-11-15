@@ -19,9 +19,17 @@
 и без глифов, а отступы съедают ширину под длинные значения. Заголовки
 вызовов и разделители при этом сохраняются.
 
-Сообщения выводятся после того, как репортёр закрыл свой узел сценария
-(ScenarioReportedEvent), поэтому конфликта с ``-r pycharm`` нет: наши suite
-не пересекаются с его testStarted/testFinished.
+Сообщения можно выводить двумя способами:
+
+* **потоково** (``stream`` задан): suite шага открывается на его входе, suite
+  вызова — на входе в функцию, а содержимое (переменные, return, ошибка)
+  дописывается и узел закрывается сразу на выходе. Тогда PyCharm сам считает
+  длительность по wall-clock между ``testSuiteStarted`` и ``testSuiteFinished``,
+  а шаги и вложенные вызовы появляются в дереве по мере выполнения. Схлопывание
+  в этом режиме не применяется: оно требует полного дерева шага;
+* **документом** (:meth:`TeamCityTreeWriter.render_document`): всё дерево
+  печатается одним куском в конце сценария, схлопнутое, с длительностью в
+  имени узла. Этот режим остаётся для ``teamcity_stream = False``.
 """
 
 from io import StringIO
@@ -63,7 +71,8 @@ class TeamCityTreeWriter(BaseReportRenderer):
 
     def __init__(self, verbosity: int = _DEFAULT_VERBOSITY,
                  tree_prefix: bool = True,
-                 path_resolver: Optional[Callable[[str], str]] = None) -> None:
+                 path_resolver: Optional[Callable[[str], str]] = None,
+                 stream: Optional[Callable[[str], None]] = None) -> None:
         self.verbosity = verbosity
         # Глифы дерева перед строками (см. докстроку модуля). Их отключают,
         # когда узлы разворачивают по одному: внутри самого узла вложенность
@@ -75,6 +84,130 @@ class TeamCityTreeWriter(BaseReportRenderer):
         self._lines: List[str] = []
         # Счётчик имён узлов: IDE склеивает одноимённые узлы одного прогона.
         self._name_counts: Dict[str, int] = {}
+
+        self.stream = stream
+        self._open_suites: List[str] = []
+        self._node_names: Dict[int, str] = {}
+        self._at_line_start = False
+
+    def start_scenario(self, scenario_name: str, scenario_path: str = "") -> None:
+        """Открыть suite сценария и сбросить счётчики имён."""
+        self._name_counts = {}
+        self._node_names = {}
+        self._open_suites = []
+        self._at_line_start = False
+        root_name = _ROOT_PREFIX + scenario_name
+        self._open_suites.append(root_name)
+        self._emit_stream(test_suite_started(root_name, self._location(scenario_path)))
+
+    def start_step(self, step: RootStep) -> None:
+        """Открыть suite шага — IDE нарисует у него индикатор выполнения."""
+        name = self.unique_name(step.name)
+        self._node_names[id(step)] = name
+        self._open_suites.append(name)
+        self._emit_stream(test_suite_started(name, self._location(step.filename, step.lineno)))
+
+    def enter_call(self, node: StepNode) -> None:
+        """Открыть suite вызова и отдать аргументы, снятые на входе."""
+        name = self.unique_name(self._call_name(node))
+        self._node_names[id(node)] = name
+        self._open_suites.append(name)
+        self._emit_stream(test_suite_started(name, self._location(node.filename, node.lineno)))
+        for child in node.children:
+            if isinstance(child, VarNode) and child.kind == "arg":
+                self._emit_var(child)
+
+    def emit_var(self, var: VarNode) -> None:
+        """Переменная владельца — строка в текущем (самом глубоком) узле."""
+        self._emit_var(var)
+
+    def leave_call(self, node: StepNode) -> None:
+        """Закрыть suite вызова: return, ошибка и завершение — одним куском."""
+        name = self._node_names.pop(id(node), None)
+        if name is None:
+            return
+
+        lines: List[str] = []
+        if node.children and node.return_value is not None:
+            lines.append("")
+        if node.return_value is not None:
+            lines.append(self._format_value(_PLAIN_INDENT, "↲", "", node.return_value))
+        if node.status == "FAIL":
+            lines.extend(self._failure_messages(
+                "💥 failure", "Call failed", "",
+                self._location(node.filename, node.lineno),
+            ))
+        lines.append(test_suite_finished(name))
+        self._emit_stream(*lines)
+        self._drop_suite(name)
+
+    def finish_step(self, step: RootStep) -> None:
+        """Закрыть висящие вызовы и сам suite шага."""
+        name = self._node_names.pop(id(step), None)
+        if name is None:
+            return
+
+        while self._open_suites and self._open_suites[-1] != name:
+            self._emit_stream(test_suite_finished(self._open_suites.pop()))
+
+        lines: List[str] = []
+        if step.status == "FAIL":
+            lines.extend(self._failure_messages(
+                "💥 failure", step.failure_error or "Step failed",
+                _failure_details(step.failure_trace or ""),
+                self._location(step.filename, step.lineno),
+            ))
+        lines.append(test_suite_finished(name))
+        self._emit_stream(*lines)
+        self._drop_suite(name)
+
+    def finish_scenario(self) -> None:
+        """Закрыть всё, что осталось открытым, включая suite сценария."""
+        while self._open_suites:
+            self._emit_stream(test_suite_finished(self._open_suites.pop()))
+
+    def abort_step(self) -> None:
+        """Аварийно закрыть шаг и вызовы, оставив suite сценария открытым."""
+        while len(self._open_suites) > 1:
+            self._emit_stream(test_suite_finished(self._open_suites.pop()))
+
+    def _call_name(self, node: StepNode) -> str:
+        """Имя узла вызова без статуса: на входе он ещё неизвестен."""
+        module = f" ({node.module})" if node.module else ""
+        return f"{node.name}{module}"
+
+    def _failure_messages(self, name: str, message: str, details: str,
+                          location: str) -> List[str]:
+        """Упавший узел: в suite нет статуса, поэтому падение — вложенный test."""
+        fail_name = self.unique_name(name)
+        return [
+            test_started(fail_name, location),
+            test_failed(fail_name, message, details),
+            test_finished(fail_name, 0.0),
+        ]
+
+    def _emit_var(self, var: VarNode) -> None:
+        if self.verbosity < _KIND_MIN_VERBOSITY.get(var.kind, 1):
+            return
+        self._emit_stream(self._format_value(
+            _PLAIN_INDENT, _KIND_MARKER.get(var.kind, "·"), var.key, var.value,
+        ))
+
+    def _emit_stream(self, *lines: str) -> None:
+        """Записать кусок вывода одним обращением к потоку."""
+        if self.stream is None or not lines:
+            return
+        chunk = "\n".join(lines) + "\n"
+        if not self._at_line_start:
+            chunk = "\n" + chunk
+        self.stream(chunk)
+        self._at_line_start = True
+
+    def _drop_suite(self, name: str) -> None:
+        try:
+            self._open_suites.remove(name)
+        except ValueError:
+            pass
 
     def _location(self, filename: str, lineno: int = 0) -> str:
         """locationHint для узла дерева — переход к исходнику по F4."""
@@ -189,6 +322,10 @@ class TeamCityTreeWriter(BaseReportRenderer):
 
     def _write_value(self, prefix: str, marker: str, key: str, value: Any) -> None:
         """Значение переменной или возврата — с префиксом своего уровня."""
+        self._write_text(self._format_value(prefix, marker, key, value))
+
+    def _format_value(self, prefix: str, marker: str, key: str, value: Any) -> str:
+        """Отрендерить значение переменной/возврата в строку вывода."""
         if key:
             head = f"{prefix}{marker} {markup_escape(key)}:"
         else:
@@ -198,7 +335,7 @@ class TeamCityTreeWriter(BaseReportRenderer):
         # выглядели бы принадлежащими другому вызову.
         cont_prefix = prefix + "  "
         rendered = _render_markup(f"{head} {markup_value(value, cont_prefix, depth=0)}")
-        self._write_text(rendered)
+        return _neutralize(rendered)
 
     def unique_name(self, name: str) -> str:
         """Уникализировать имя узла: повторы нумеруются суффиксом ``#N``."""

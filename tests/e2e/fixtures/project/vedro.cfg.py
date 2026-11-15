@@ -65,6 +65,7 @@ class Config(vedro.Config):
             report_formats = _env_report_formats("TR_REPORT_FORMATS", ReportType.HTML)
             output_dir = os.environ.get("TR_OUTPUT_DIR", "reports")
             print_to_stdout = _env_bool("TR_PRINT_TO_STDOUT", False)
+            teamcity_stream = _env_bool("TR_TEAMCITY_STREAM", True)
             cleanup_before = True
             # Детерминированный job_id/pattern — не нужны локально, тест не
             # имитирует GitLab CI.

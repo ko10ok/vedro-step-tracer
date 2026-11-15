@@ -136,3 +136,5 @@ class VedroStepTracer(PluginConfig):
     # False — печатать только заголовки и содержимое: внутри развёрнутого
     # узла вложенность видна и без них, а отступы съедают ширину под значения.
     teamcity_tree_prefix: bool = False
+
+    teamcity_stream: bool = True
