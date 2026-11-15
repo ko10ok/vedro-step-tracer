@@ -1,6 +1,6 @@
 [project]
 name = "vedro-step-tracer"
-version = "0.1.0"
+version = "1.0.0"
 description = "Vedro plugin that traces function calls in e2e steps and renders call-tree reports"
 requires-python = ">=3.9"
 dependencies = [
