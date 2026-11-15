@@ -39,27 +39,30 @@ class Scenario(vedro.Scenario):
         expected = schema.str.regex(in_order(
             "##teamcity[testSuiteStarted name='🔎 trace: streaming call order'",
             "##teamcity[testSuiteStarted name='given_user_id'",
-            "  ⇒ user_id: 42",
+            "│▏  ¦   │   ⇒ user_id: 42",
             "##teamcity[testSuiteFinished name='given_user_id'",
             "##teamcity[testSuiteStarted name='when_user_is_fetched_through_wrapper'",
             "##teamcity[testSuiteStarted name='passthrough_wrapper (contexts.sample_calls)'",
-            "  → user_id: 42",
+            "│█▏ ¦   │   → user_id: 42",
             "##teamcity[testSuiteStarted name='fetch_user (contexts.sample_calls)'",
-            "  → user_id: 42",
+            "│██▏¦   │   → user_id: 42",
             "##teamcity[testSuiteStarted name='_build_payload (contexts.sample_calls)'",
-            "  → user_id: 42",
-            "  ↲ {",
-            "        user_id: 42",
+            "│██▓¦▏  │   → user_id: 42",
+            "│██▓¦▏  │   ↲ ",
+            "s  {",
+            "│██▓¦▏  │         user_id: 42",
             "##teamcity[testSuiteFinished name='_build_payload (contexts.sample_calls)'",
             "##teamcity[testSuiteStarted name='_format_greeting (contexts.sample_calls)'",
-            "  → name: 'user-42'",
-            "  ↲ 'Hello, user-42!'",
+            "│██▓¦▏  │   → name: 'user-42'",
+            "│██▓¦▏  │   ↲ ",
+            "s  'Hello, user-42!'",
             "##teamcity[testSuiteFinished name='_format_greeting (contexts.sample_calls)'",
-            "  ↲ {",
-            "        greeting: 'Hello, user-42!'",
+            "│██▏¦   │   ↲ ",
+            "s  {",
+            "│██▏¦   │         greeting: 'Hello, user-42!'",
             "##teamcity[testSuiteFinished name='fetch_user (contexts.sample_calls)'",
             "##teamcity[testSuiteFinished name='passthrough_wrapper (contexts.sample_calls)'",
-            "  ⇒ payload: {",
+            "│▏  ¦   │   ⇒ payload: {",
             "##teamcity[testSuiteFinished name='when_user_is_fetched_through_wrapper'",
             "##teamcity[testSuiteStarted name='then_payload_should_contain_greeting'",
             "##teamcity[testSuiteFinished name='then_payload_should_contain_greeting'",
@@ -67,8 +70,8 @@ class Scenario(vedro.Scenario):
         ))
         assert self.run.stdout == expected % self.run.stdout
 
-    def and_stdout_should_have_no_breadcrumbs_or_duration_hint(self):
-        expected = schema.str.regex(without("passthrough_wrapper → fetch_user", "⏱"))
+    def and_stdout_should_have_no_breadcrumbs(self):
+        expected = schema.str.regex(without("passthrough_wrapper → fetch_user"))
         assert self.run.stdout == expected % self.run.stdout
 
     def and_every_suite_should_be_closed_in_order(self):

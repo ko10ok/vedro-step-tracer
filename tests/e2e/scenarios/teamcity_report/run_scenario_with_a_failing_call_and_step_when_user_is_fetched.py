@@ -39,7 +39,7 @@ class Scenario(vedro.Scenario):
         expected = schema.str.regex(in_order(
             "##teamcity[testSuiteStarted name='🔎 trace: trace a failing call'",
             "##teamcity[testSuiteStarted name='given_user_id'",
-            "  ⇒ user_id: 7",
+            "│▏  ¦   │   ⇒ user_id: 7",
             "##teamcity[testSuiteFinished name='given_user_id'",
             "##teamcity[testSuiteStarted name='when_user_is_fetched'",
             "##teamcity[testSuiteStarted name='fetch_user (contexts.sample_calls)'",
@@ -48,7 +48,7 @@ class Scenario(vedro.Scenario):
             "##teamcity[testSuiteStarted name='_format_greeting (contexts.sample_calls)'",
             "##teamcity[testSuiteFinished name='_format_greeting (contexts.sample_calls)'",
             "##teamcity[testSuiteFinished name='fetch_user (contexts.sample_calls)'",
-            "  ⇒ payload: {",
+            "│▏  ¦   │   ⇒ payload: {",
             "##teamcity[testSuiteFinished name='when_user_is_fetched'",
             "##teamcity[testSuiteStarted name='then_it_should_be_banned'",
             "##teamcity[testStarted name='💥 failure'",

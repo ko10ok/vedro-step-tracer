@@ -40,10 +40,10 @@ class Scenario(vedro.Scenario):
         expected = schema.str.regex(in_order(
             "##teamcity[testSuiteStarted name='🔎 trace: streaming many steps'",
             "##teamcity[testSuiteStarted name='given_user_id'",
-            "  ⇒ user_id: 42",
+            "│▏  ¦   │   ⇒ user_id: 42",
             "##teamcity[testSuiteFinished name='given_user_id'",
             "##teamcity[testSuiteStarted name='when_greeting_is_built'",
-            "  ⇒ greeting: 'Hello, user-42!'",
+            "│▏  ¦   │   ⇒ greeting: 'Hello, user-42!'",
             "##teamcity[testSuiteFinished name='when_greeting_is_built'",
             "##teamcity[testSuiteStarted name='then_greeting_should_be_correct'",
             "##teamcity[testSuiteFinished name='then_greeting_should_be_correct'",

@@ -44,7 +44,7 @@ class Scenario(vedro.Scenario):
             "##teamcity[enteredTheMatrix durationStrategy='MANUAL']",
             "##teamcity[testSuiteStarted name='🔎 trace: pycharm nesting probe'",
             "##teamcity[testSuiteStarted name='given_user_id'",
-            "  ⇒ user_id: 42",
+            "│▏  ¦   │   ⇒ user_id: 42",
             "##teamcity[testSuiteFinished name='given_user_id'",
             "##teamcity[testSuiteStarted name='when_user_is_fetched'",
             "##teamcity[testSuiteStarted name='fetch_user (contexts.sample_calls)'",

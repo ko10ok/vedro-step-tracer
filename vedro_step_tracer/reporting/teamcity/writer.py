@@ -27,7 +27,19 @@
   появляются в дереве по мере выполнения. Длительность передаётся в
   ``testSuiteFinished`` (``durationStrategy='MANUAL'``): у suite без детей
   раннер не может посчитать её сам. Схлопывание в этом режиме не
-  применяется: оно требует полного дерева шага;
+  применяется: оно требует полного дерева шага.
+
+  Рядом с каждым suite в обычный текст пишется строка-заголовок с именем
+  шага/вызова: раннер IDE привязывает обычный текст к запущенному тесту, а
+  не к текущему suite, поэтому без заголовков в скопированном логе нельзя
+  понять, какому шагу принадлежат значения. В начале сценария печатается
+  заголовок теста. Индикатор вложенности — полоса постоянной ширины в
+  квадратных скобках (8 уровней, дальше заполнена целиком): знакоместа
+  закрашиваются слева направо, секции по два знакоместа чередуют яркость,
+  у шага сценария (уровень 0) стоит только отсечка.
+  Тот же индикатор заменяет отступ у строк значений: по нему видно,
+  какому вызову принадлежит вывод;
+
 * **документом** (:meth:`TeamCityTreeWriter.render_document`): всё дерево
   печатается одним куском в конце сценария, схлопнутое, с длительностью в
   имени узла. Этот режим остаётся для ``teamcity_stream = False``.
@@ -69,6 +81,44 @@ _PLAIN_INDENT = "  "
 # Длительность меньше миллисекунды в заголовке — только шум.
 _MIN_SHOWN_DURATION = 0.001
 
+# Индикатор уровня вложенности в текстовом логе стриминга: полоса
+# постоянной ширины, разбитая на секции по два знакоместа. Закрашенные
+# Закрашенные секции чередуют яркость: чётная тёмная ``█``, нечётная
+# светлая ``▓``. Незаполненная часть сливается с чёрным фоном.
+# Незаполненный сегмент начинается с отсечки ``▏``. Уровень 0 — одна
+# отсечка, каждый следующий уровень закрашивает очередное знакоместо;
+# с шестого уровня полоса заполнена целиком.
+_BAR_WIDTH = 6
+_BAR_SECTION = 2
+_BAR_EDGE = "\u258f"
+_BAR_MIDDLE = "\u00a6"
+_BAR_FILLED = ("\u2588", "\u2593")
+_BAR_EMPTY = " "
+
+
+def _depth_fill(level: int) -> str:
+    """Строка заполнения индикатора для уровня вложенности."""
+    cells = []
+    for index in range(_BAR_WIDTH):
+        if index < level:
+            cells.append(_BAR_FILLED[(index // _BAR_SECTION) % 2])
+        elif index == level:
+            cells.append(_BAR_EDGE)
+        else:
+            cells.append(_BAR_EMPTY)
+    return "".join(cells)
+
+
+def _depth_bar(level: int) -> str:
+    """Полоса уровня глубины: границы, середина и собственный отступ."""
+    fill = _depth_fill(level)
+    half = _BAR_WIDTH // 2
+    gap = _BAR_EMPTY * 2
+    return f"│{fill[:half]}{_BAR_MIDDLE}{fill[half:]}│{gap}"
+
+# Начало теста в текстовом логе (уровень выше шага).
+_SCENARIO_HEADER = "▶ "
+
 
 class TeamCityTreeWriter(BaseReportRenderer):
     """Рендерит дерево шагов в поток service-сообщений TeamCity."""
@@ -94,6 +144,10 @@ class TeamCityTreeWriter(BaseReportRenderer):
         self._node_names: Dict[int, str] = {}
         self._at_line_start = False
         self._reporter_attached = False
+        self._call_depth = 0
+        # Тип последней текстовой строки: по нему решается, нужна ли пустая
+        # строка перед заголовком следующей функции.
+        self._last_line_kind = "blank"
 
     def start_scenario(self, scenario_name: str, scenario_path: str = "") -> None:
         """Открыть suite сценария и сбросить счётчики имён."""
@@ -101,12 +155,17 @@ class TeamCityTreeWriter(BaseReportRenderer):
         self._node_names = {}
         self._open_suites = []
         self._at_line_start = False
+        self._call_depth = 0
+        self._last_line_kind = "blank"
         if not self._reporter_attached:
             self._emit_stream(test_reporter_attached())
             self._reporter_attached = True
         root_name = _ROOT_PREFIX + scenario_name
         self._open_suites.append(root_name)
         self._emit_stream(test_suite_started(root_name, self._location(scenario_path)))
+        self._emit_text(f"{_SCENARIO_HEADER}{scenario_name}")
+        self._emit_text(self._depth_gap())
+        self._last_line_kind = "blank"
 
     def start_step(self, step: RootStep) -> None:
         """Открыть suite шага — IDE нарисует у него индикатор выполнения."""
@@ -114,6 +173,9 @@ class TeamCityTreeWriter(BaseReportRenderer):
         self._node_names[id(step)] = name
         self._open_suites.append(name)
         self._emit_stream(test_suite_started(name, self._location(step.filename, step.lineno)))
+        self._call_depth = 0
+        self._emit_text(f"\033[1m{self._depth_indent(0)}{name}\033[0m")
+        self._last_line_kind = "header"
 
     def enter_call(self, node: StepNode) -> None:
         """Открыть suite вызова и отдать аргументы, снятые на входе."""
@@ -121,6 +183,13 @@ class TeamCityTreeWriter(BaseReportRenderer):
         self._node_names[id(node)] = name
         self._open_suites.append(name)
         self._emit_stream(test_suite_started(name, self._location(node.filename, node.lineno)))
+        # Переменные перед вызовом отделяются пустой строкой на уровне
+        # владельца: так блок аргументов не сливается с заголовком функции.
+        if self._last_line_kind == "var":
+            self._emit_text(self._depth_indent(self._call_depth))
+        self._call_depth += 1
+        self._emit_text(f"\033[1m{self._depth_indent(self._call_depth)}{name}\033[0m")
+        self._last_line_kind = "header"
         for child in node.children:
             if isinstance(child, VarNode) and child.kind == "arg":
                 self._emit_var(child)
@@ -136,17 +205,22 @@ class TeamCityTreeWriter(BaseReportRenderer):
             return
 
         lines: List[str] = []
-        if node.children and node.return_value is not None:
-            lines.append("")
         if node.return_value is not None:
-            lines.append(self._format_value(_PLAIN_INDENT, "↲", "", node.return_value))
+            marker = _return_marker(node.duration)
+            lines.append(self._format_value(
+                self._depth_indent(self._call_depth), marker, "", node.return_value,
+            ))
         if node.status == "FAIL":
             lines.extend(self._failure_messages(
                 "💥 failure", "Call failed", "",
                 self._location(node.filename, node.lineno),
             ))
         lines.append(test_suite_finished(name, node.duration))
+        self._call_depth = max(0, self._call_depth - 1)
+        if node.return_value is not None:
+            lines.append(self._depth_indent(self._call_depth))
         self._emit_stream(*lines)
+        self._last_line_kind = "call_end" if node.return_value is None else "blank"
         self._drop_suite(name)
 
     def finish_step(self, step: RootStep) -> None:
@@ -159,6 +233,10 @@ class TeamCityTreeWriter(BaseReportRenderer):
             self._emit_stream(test_suite_finished(self._open_suites.pop()))
 
         lines: List[str] = []
+        lines.append(self._format_value(
+            self._depth_indent(0), _return_marker(step.duration), "", None,
+        ))
+        lines.append(self._depth_gap())
         if step.status == "FAIL":
             lines.extend(self._failure_messages(
                 "💥 failure", step.failure_error or "Step failed",
@@ -167,10 +245,12 @@ class TeamCityTreeWriter(BaseReportRenderer):
             ))
         lines.append(test_suite_finished(name, step.duration))
         self._emit_stream(*lines)
+        self._last_line_kind = "blank"
         self._drop_suite(name)
 
     def finish_scenario(self, duration: Optional[float] = None) -> None:
         """Закрыть всё, что осталось открытым, включая suite сценария."""
+        self._call_depth = 0
         while self._open_suites:
             name = self._open_suites.pop()
             root = not self._open_suites
@@ -200,8 +280,22 @@ class TeamCityTreeWriter(BaseReportRenderer):
         if self.verbosity < _KIND_MIN_VERBOSITY.get(var.kind, 1):
             return
         self._emit_stream(self._format_value(
-            _PLAIN_INDENT, _KIND_MARKER.get(var.kind, "·"), var.key, var.value,
+            self._depth_indent(self._call_depth),
+            _KIND_MARKER.get(var.kind, "·"), var.key, var.value,
         ))
+        self._last_line_kind = "var"
+
+    def _depth_indent(self, depth: int) -> str:
+        """Отступ данных: полоса уровня плюс отдельный пробел содержимого."""
+        return f"{_depth_bar(depth)}{_BAR_EMPTY}"
+
+    def _depth_gap(self) -> str:
+        """Пустая строка уровня сценария — без индикатора вложенности."""
+        return ""
+
+    def _emit_text(self, line: str) -> None:
+        """Записать строку обычного вывода в поток стриминга."""
+        self._emit_stream(_neutralize(line))
 
     def _emit_stream(self, *lines: str) -> None:
         """Записать кусок вывода одним обращением к потоку."""
@@ -421,6 +515,13 @@ def _duration_hint(duration: Optional[float]) -> str:
     if duration is None or duration < _MIN_SHOWN_DURATION:
         return ""
     return f"  ⏱ {duration:.2f}s"
+
+
+def _return_marker(duration: Optional[float]) -> str:
+    """Маркер возврата: стрелка, время выполнения и зазор под значение."""
+    if duration is None:
+        return "↲ ⏱ "
+    return f"↲ ⏱ {duration:.2f}s "
 
 
 def _neutralize(text: str) -> str:

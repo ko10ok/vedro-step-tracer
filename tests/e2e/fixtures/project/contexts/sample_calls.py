@@ -94,3 +94,24 @@ def summarize_user_ids(user_ids: List[int]) -> int:
 async def async_fetch_user(user_id: int) -> Dict[str, object]:
     await asyncio.sleep(0)
     return fetch_user(user_id)
+
+
+def deep_leaf(value: int) -> int:
+    doubled = value * 2
+    return doubled
+
+
+def deep_branch(value: int) -> int:
+    left = deep_leaf(value + 1)
+    right = deep_leaf(value + 2)
+    return left + right
+
+
+def deep_middle(value: int) -> int:
+    total = deep_branch(value + 3)
+    return total + 1
+
+
+def deep_chain(value: int) -> int:
+    total = deep_middle(value + 4)
+    return total + 2
