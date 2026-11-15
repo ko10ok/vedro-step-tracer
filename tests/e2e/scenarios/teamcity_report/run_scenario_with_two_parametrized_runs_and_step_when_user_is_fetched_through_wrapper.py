@@ -53,12 +53,12 @@ class Scenario(vedro.Scenario):
         expected = schema.str.regex(in_order(
             "##teamcity[testSuiteStarted name='🔎 trace: trace nested calls with variables (42) |[1|]'",
             "##teamcity[testSuiteStarted name='when_user_is_fetched_through_wrapper'",
-            "##teamcity[testSuiteFinished name='when_user_is_fetched_through_wrapper']",
-            "##teamcity[testSuiteFinished name='🔎 trace: trace nested calls with variables (42) |[1|]']",
+            "##teamcity[testSuiteFinished name='when_user_is_fetched_through_wrapper'",
+            "##teamcity[testSuiteFinished name='🔎 trace: trace nested calls with variables (42) |[1|]'",
             "##teamcity[testSuiteStarted name='🔎 trace: trace nested calls with variables (43) |[2|]'",
             "##teamcity[testSuiteStarted name='when_user_is_fetched_through_wrapper'",
-            "##teamcity[testSuiteFinished name='when_user_is_fetched_through_wrapper']",
-            "##teamcity[testSuiteFinished name='🔎 trace: trace nested calls with variables (43) |[2|]']",
+            "##teamcity[testSuiteFinished name='when_user_is_fetched_through_wrapper'",
+            "##teamcity[testSuiteFinished name='🔎 trace: trace nested calls with variables (43) |[2|]'",
         ))
         assert self.run.stdout == expected % self.run.stdout
 

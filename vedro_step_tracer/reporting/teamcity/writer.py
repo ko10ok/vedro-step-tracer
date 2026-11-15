@@ -23,10 +23,11 @@
 
 * **потоково** (``stream`` задан): suite шага открывается на его входе, suite
   вызова — на входе в функцию, а содержимое (переменные, return, ошибка)
-  дописывается и узел закрывается сразу на выходе. Тогда PyCharm сам считает
-  длительность по wall-clock между ``testSuiteStarted`` и ``testSuiteFinished``,
-  а шаги и вложенные вызовы появляются в дереве по мере выполнения. Схлопывание
-  в этом режиме не применяется: оно требует полного дерева шага;
+  дописывается и узел закрывается сразу на выходе. Шаги и вложенные вызовы
+  появляются в дереве по мере выполнения. Длительность передаётся в
+  ``testSuiteFinished`` (``durationStrategy='MANUAL'``): у suite без детей
+  раннер не может посчитать её сам. Схлопывание в этом режиме не
+  применяется: оно требует полного дерева шага;
 * **документом** (:meth:`TeamCityTreeWriter.render_document`): всё дерево
   печатается одним куском в конце сценария, схлопнутое, с длительностью в
   имени узла. Этот режим остаётся для ``teamcity_stream = False``.
@@ -42,7 +43,10 @@ from ...tracing import RootStep, StepNode, VarNode
 from ..base import BaseReportRenderer
 from ..status import PLAIN_STATUS_EMOJI
 from ..terminal.markup import INDENT, get_style, markup_value
-from .messages import file_location, test_failed, test_finished, test_started, test_suite_finished, test_suite_started
+from .messages import (
+    file_location, test_failed, test_finished, test_reporter_attached,
+    test_started, test_suite_finished, test_suite_started,
+)
 
 __all__ = ("TeamCityTreeWriter",)
 
@@ -89,6 +93,7 @@ class TeamCityTreeWriter(BaseReportRenderer):
         self._open_suites: List[str] = []
         self._node_names: Dict[int, str] = {}
         self._at_line_start = False
+        self._reporter_attached = False
 
     def start_scenario(self, scenario_name: str, scenario_path: str = "") -> None:
         """Открыть suite сценария и сбросить счётчики имён."""
@@ -96,6 +101,9 @@ class TeamCityTreeWriter(BaseReportRenderer):
         self._node_names = {}
         self._open_suites = []
         self._at_line_start = False
+        if not self._reporter_attached:
+            self._emit_stream(test_reporter_attached())
+            self._reporter_attached = True
         root_name = _ROOT_PREFIX + scenario_name
         self._open_suites.append(root_name)
         self._emit_stream(test_suite_started(root_name, self._location(scenario_path)))
@@ -137,7 +145,7 @@ class TeamCityTreeWriter(BaseReportRenderer):
                 "💥 failure", "Call failed", "",
                 self._location(node.filename, node.lineno),
             ))
-        lines.append(test_suite_finished(name))
+        lines.append(test_suite_finished(name, node.duration))
         self._emit_stream(*lines)
         self._drop_suite(name)
 
@@ -157,14 +165,16 @@ class TeamCityTreeWriter(BaseReportRenderer):
                 _failure_details(step.failure_trace or ""),
                 self._location(step.filename, step.lineno),
             ))
-        lines.append(test_suite_finished(name))
+        lines.append(test_suite_finished(name, step.duration))
         self._emit_stream(*lines)
         self._drop_suite(name)
 
-    def finish_scenario(self) -> None:
+    def finish_scenario(self, duration: Optional[float] = None) -> None:
         """Закрыть всё, что осталось открытым, включая suite сценария."""
         while self._open_suites:
-            self._emit_stream(test_suite_finished(self._open_suites.pop()))
+            name = self._open_suites.pop()
+            root = not self._open_suites
+            self._emit_stream(test_suite_finished(name, duration if root else None))
 
     def abort_step(self) -> None:
         """Аварийно закрыть шаг и вызовы, оставив suite сценария открытым."""

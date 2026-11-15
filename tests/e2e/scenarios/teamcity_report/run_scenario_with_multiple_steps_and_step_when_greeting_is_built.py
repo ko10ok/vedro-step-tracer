@@ -41,15 +41,15 @@ class Scenario(vedro.Scenario):
             "##teamcity[testSuiteStarted name='🔎 trace: streaming many steps'",
             "##teamcity[testSuiteStarted name='given_user_id'",
             "  ⇒ user_id: 42",
-            "##teamcity[testSuiteFinished name='given_user_id']",
+            "##teamcity[testSuiteFinished name='given_user_id'",
             "##teamcity[testSuiteStarted name='when_greeting_is_built'",
             "  ⇒ greeting: 'Hello, user-42!'",
-            "##teamcity[testSuiteFinished name='when_greeting_is_built']",
+            "##teamcity[testSuiteFinished name='when_greeting_is_built'",
             "##teamcity[testSuiteStarted name='then_greeting_should_be_correct'",
-            "##teamcity[testSuiteFinished name='then_greeting_should_be_correct']",
+            "##teamcity[testSuiteFinished name='then_greeting_should_be_correct'",
             "##teamcity[testSuiteStarted name='and_user_id_should_be_positive'",
-            "##teamcity[testSuiteFinished name='and_user_id_should_be_positive']",
-            "##teamcity[testSuiteFinished name='🔎 trace: streaming many steps']",
+            "##teamcity[testSuiteFinished name='and_user_id_should_be_positive'",
+            "##teamcity[testSuiteFinished name='🔎 trace: streaming many steps'",
         ))
         assert self.run.stdout == expected % self.run.stdout
 

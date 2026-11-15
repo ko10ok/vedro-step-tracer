@@ -59,7 +59,7 @@ class Scenario(vedro.Scenario):
             "##teamcity[testSuiteStarted name='✔ when_user_is_fetched_through_wrapper",
             "##teamcity[testSuiteStarted name='✔ passthrough_wrapper → fetch_user (contexts.sample_calls)'",
             "  → user_id: 42",
-            "##teamcity[testSuiteFinished name='✔ passthrough_wrapper → fetch_user (contexts.sample_calls)']",
+            "##teamcity[testSuiteFinished name='✔ passthrough_wrapper → fetch_user (contexts.sample_calls)'",
             "##teamcity[testSuiteFinished name='✔ when_user_is_fetched_through_wrapper",
         ))
         assert self.run.stdout == expected % self.run.stdout

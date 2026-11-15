@@ -2,7 +2,7 @@ import vedro
 from d42 import schema
 
 from e2e.contexts.run_fixture_scenario import run_fixture_scenario
-from e2e.contexts.teamcity_messages import unclosed_suites
+from e2e.contexts.teamcity_messages import suites_without_duration, unclosed_suites
 from e2e.contexts.text_schema import in_order, without
 
 
@@ -40,7 +40,7 @@ class Scenario(vedro.Scenario):
             "##teamcity[testSuiteStarted name='🔎 trace: streaming call order'",
             "##teamcity[testSuiteStarted name='given_user_id'",
             "  ⇒ user_id: 42",
-            "##teamcity[testSuiteFinished name='given_user_id']",
+            "##teamcity[testSuiteFinished name='given_user_id'",
             "##teamcity[testSuiteStarted name='when_user_is_fetched_through_wrapper'",
             "##teamcity[testSuiteStarted name='passthrough_wrapper (contexts.sample_calls)'",
             "  → user_id: 42",
@@ -50,28 +50,33 @@ class Scenario(vedro.Scenario):
             "  → user_id: 42",
             "  ↲ {",
             "        user_id: 42",
-            "##teamcity[testSuiteFinished name='_build_payload (contexts.sample_calls)']",
+            "##teamcity[testSuiteFinished name='_build_payload (contexts.sample_calls)'",
             "##teamcity[testSuiteStarted name='_format_greeting (contexts.sample_calls)'",
             "  → name: 'user-42'",
             "  ↲ 'Hello, user-42!'",
-            "##teamcity[testSuiteFinished name='_format_greeting (contexts.sample_calls)']",
+            "##teamcity[testSuiteFinished name='_format_greeting (contexts.sample_calls)'",
             "  ↲ {",
             "        greeting: 'Hello, user-42!'",
-            "##teamcity[testSuiteFinished name='fetch_user (contexts.sample_calls)']",
-            "##teamcity[testSuiteFinished name='passthrough_wrapper (contexts.sample_calls)']",
+            "##teamcity[testSuiteFinished name='fetch_user (contexts.sample_calls)'",
+            "##teamcity[testSuiteFinished name='passthrough_wrapper (contexts.sample_calls)'",
             "  ⇒ payload: {",
-            "##teamcity[testSuiteFinished name='when_user_is_fetched_through_wrapper']",
+            "##teamcity[testSuiteFinished name='when_user_is_fetched_through_wrapper'",
             "##teamcity[testSuiteStarted name='then_payload_should_contain_greeting'",
-            "##teamcity[testSuiteFinished name='then_payload_should_contain_greeting']",
-            "##teamcity[testSuiteFinished name='🔎 trace: streaming call order']",
+            "##teamcity[testSuiteFinished name='then_payload_should_contain_greeting'",
+            "##teamcity[testSuiteFinished name='🔎 trace: streaming call order'",
         ))
         assert self.run.stdout == expected % self.run.stdout
 
-    def and_stdout_should_have_no_breadcrumbs_or_duration(self):
+    def and_stdout_should_have_no_breadcrumbs_or_duration_hint(self):
         expected = schema.str.regex(without("passthrough_wrapper → fetch_user", "⏱"))
         assert self.run.stdout == expected % self.run.stdout
 
     def and_every_suite_should_be_closed_in_order(self):
         actual = unclosed_suites(self.run.stdout)
+        expected = schema.list([])
+        assert actual == expected % actual
+
+    def and_every_suite_should_carry_a_duration(self):
+        actual = suites_without_duration(self.run.stdout)
         expected = schema.list([])
         assert actual == expected % actual

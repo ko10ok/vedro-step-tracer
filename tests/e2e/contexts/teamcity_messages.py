@@ -3,7 +3,8 @@
 import re
 from typing import List, Tuple
 
-__all__ = ("messages", "suite_events", "all_suite_names", "unclosed_suites")
+__all__ = ("messages", "suite_events", "all_suite_names", "unclosed_suites",
+           "suites_without_duration")
 
 _NAME = re.compile(r"name='((?:[^'|]|\|.)*)'")
 _MESSAGE = re.compile(r"##teamcity\[(\w+)(.*?)\]")
@@ -73,3 +74,10 @@ def unclosed_suites(stdout: str) -> List[str]:
                     stack.pop()
                 stack.pop()
     return problems + stack
+
+
+def suites_without_duration(stdout: str) -> List[str]:
+    """Имена завершённых suite, у которых нет атрибута duration."""
+    return [_name(_message.group(2)) for _message in _MESSAGE.finditer(stdout)
+            if _message.group(1) == "testSuiteFinished"
+            and " duration='" not in _message.group(2)]

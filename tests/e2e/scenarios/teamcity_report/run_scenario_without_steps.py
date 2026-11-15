@@ -30,7 +30,7 @@ class Scenario(vedro.Scenario):
     def and_stdout_should_follow_the_expected_sequence(self):
         expected = schema.str.regex(in_order(
             "##teamcity[testSuiteStarted name='🔎 trace: streaming no steps'",
-            "##teamcity[testSuiteFinished name='🔎 trace: streaming no steps']",
+            "##teamcity[testSuiteFinished name='🔎 trace: streaming no steps'",
         ))
         assert self.run.stdout == expected % self.run.stdout
 

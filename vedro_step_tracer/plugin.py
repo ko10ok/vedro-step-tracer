@@ -588,7 +588,9 @@ class VedroStepTracerPlugin(Plugin):
     async def on_scenario_reported(self, event: ScenarioReportedEvent) -> None:
         """Сценарий завершён — закрываем дерево и выводим накопленный трейс."""
         if self._stream_active:
-            self._teamcity_writer.finish_scenario()
+            self._teamcity_writer.finish_scenario(
+                event.aggregated_result.elapsed,
+            )
             self._emit_timing()
 
         if not self._scenario_steps:

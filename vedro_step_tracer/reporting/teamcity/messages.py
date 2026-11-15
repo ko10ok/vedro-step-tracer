@@ -13,10 +13,11 @@
 """
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 __all__ = (
-    "escape_value", "service_message", "test_suite_started", "test_suite_finished",
+    "escape_value", "service_message", "test_reporter_attached",
+    "test_suite_started", "test_suite_finished",
     "test_started", "test_finished", "test_failed", "file_location",
 )
 
@@ -68,12 +69,28 @@ def _with_location(attributes: Dict[str, Any], location: str) -> Dict[str, Any]:
     return attributes
 
 
+def test_reporter_attached(duration_strategy: str = "MANUAL") -> str:
+    """
+    Сообщить IDEA стратегию расчёта длительности.
+
+    ``MANUAL`` заставляет раннер брать длительность suite из атрибута
+    ``duration`` у ``testSuiteFinished``, а не суммировать детей: у шага
+    и вызова без вложенных узлов суммировать нечего, и без этого время
+    в дереве не отображалось вовсе.
+    """
+    return service_message("enteredTheMatrix",
+                           {"durationStrategy": duration_strategy})
+
+
 def test_suite_started(name: str, location: str = "") -> str:
     return service_message("testSuiteStarted", _with_location({"name": name}, location))
 
 
-def test_suite_finished(name: str) -> str:
-    return service_message("testSuiteFinished", {"name": name})
+def test_suite_finished(name: str, duration: Optional[float] = None) -> str:
+    attributes: Dict[str, Any] = {"name": name}
+    if duration is not None:
+        attributes["duration"] = int(max(duration, 0.0) * 1000)
+    return service_message("testSuiteFinished", attributes)
 
 
 def test_started(name: str, location: str = "") -> str:

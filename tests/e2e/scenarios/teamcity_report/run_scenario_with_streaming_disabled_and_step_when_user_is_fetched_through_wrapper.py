@@ -52,11 +52,11 @@ class Scenario(vedro.Scenario):
             "##teamcity[testFinished name='✔ _build_payload (contexts.sample_calls)'",
             "##teamcity[testStarted name='✔ _format_greeting (contexts.sample_calls)'",
             "##teamcity[testFinished name='✔ _format_greeting (contexts.sample_calls)'",
-            "##teamcity[testSuiteFinished name='✔ passthrough_wrapper → fetch_user (contexts.sample_calls)']",
+            "##teamcity[testSuiteFinished name='✔ passthrough_wrapper → fetch_user (contexts.sample_calls)'",
             "##teamcity[testSuiteFinished name='✔ when_user_is_fetched_through_wrapper",
             "##teamcity[testStarted name='✔ then_payload_should_contain_greeting'",
             "##teamcity[testFinished name='✔ then_payload_should_contain_greeting'",
-            "##teamcity[testSuiteFinished name='🔎 trace: legacy document mode']",
+            "##teamcity[testSuiteFinished name='🔎 trace: legacy document mode'",
         ))
         assert self.run.stdout == expected % self.run.stdout
 
