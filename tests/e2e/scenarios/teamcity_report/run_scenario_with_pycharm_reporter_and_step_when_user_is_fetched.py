@@ -40,8 +40,9 @@ class Scenario(vedro.Scenario):
 
     def and_stdout_should_follow_the_expected_sequence(self):
         expected = schema.str.regex(in_order(
-            "##teamcity[testSuiteStarted name='🔎 trace: pycharm nesting probe'",
             "##teamcity[testStarted name='pycharm nesting probe'",
+            "##teamcity[enteredTheMatrix durationStrategy='MANUAL']",
+            "##teamcity[testSuiteStarted name='🔎 trace: pycharm nesting probe'",
             "##teamcity[testSuiteStarted name='given_user_id'",
             "  ⇒ user_id: 42",
             "##teamcity[testSuiteFinished name='given_user_id'",

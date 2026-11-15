@@ -222,7 +222,7 @@ class VedroStepTracerPlugin(Plugin):
         dispatcher.listen(ConfigLoadedEvent, self.on_config_loaded)
         dispatcher.listen(ArgParseEvent, self.on_arg_parse)
         dispatcher.listen(ArgParsedEvent, self.on_arg_parsed)
-        dispatcher.listen(ScenarioRunEvent, self.on_scenario_run, priority=-1)
+        dispatcher.listen(ScenarioRunEvent, self.on_scenario_run, priority=1)
         dispatcher.listen(StepRunEvent, self.on_step_run)
         dispatcher.listen(StepPassedEvent, self.on_step_passed)
         dispatcher.listen(StepFailedEvent, self.on_step_failed)
