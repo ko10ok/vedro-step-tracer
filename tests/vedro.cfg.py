@@ -18,3 +18,5 @@ class Config(vedro.Config):
         class StepTracer(VedroStepTracer):
             target_dirs = ["e2e/contexts"]
             output_dir = "traces"
+            # Рабочая директория прогона — сам tests/, без вложенного подпути.
+            workdir_subpath = ""

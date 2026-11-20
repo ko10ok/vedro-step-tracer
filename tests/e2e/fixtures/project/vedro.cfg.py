@@ -67,6 +67,8 @@ class Config(vedro.Config):
             print_to_stdout = _env_bool("TR_PRINT_TO_STDOUT", False)
             teamcity_stream = _env_bool("TR_TEAMCITY_STREAM", True)
             cleanup_before = True
+            # Фикстур-проект сам является рабочей директорией: подпуть не нужен.
+            workdir_subpath = ""
             # Детерминированный job_id/pattern — не нужны локально, тест не
             # имитирует GitLab CI.
             job_id = ""
